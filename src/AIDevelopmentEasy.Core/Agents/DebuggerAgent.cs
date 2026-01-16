@@ -224,6 +224,271 @@ IMPORTANT: Always output the COMPLETE fixed file, not just the changed lines.";
         };
     }
 
+    /// <summary>
+    /// Debug multiple files together in a single project.
+    /// This allows test files to reference their implementation files.
+    /// </summary>
+    /// <param name="files">Dictionary of filename -> code content</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>AgentResponse with build results</returns>
+    public async Task<AgentResponse> DebugMultipleFilesAsync(
+        Dictionary<string, string> files,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsCSharp)
+        {
+            return new AgentResponse
+            {
+                Success = false,
+                Error = "Multi-file debugging is only supported for C#"
+            };
+        }
+
+        _logger?.LogInformation("[Debugger] Starting multi-file debug for {Count} files", files.Count);
+
+        var attempts = 0;
+        var currentFiles = new Dictionary<string, string>(files);
+        var allLogs = new List<ExecutionLog>();
+
+        while (attempts < _maxRetries)
+        {
+            attempts++;
+            _logger?.LogInformation("[Debugger] Multi-file attempt {Attempt}/{Max}", attempts, _maxRetries);
+
+            var (success, output, error) = await ExecuteMultipleCSharpFilesAsync(currentFiles, cancellationToken);
+
+            allLogs.Add(new ExecutionLog
+            {
+                Code = string.Join("\n\n// === FILE SEPARATOR ===\n\n", currentFiles.Select(f => $"// {f.Key}\n{f.Value}")),
+                Success = success,
+                Output = output,
+                Error = error
+            });
+
+            if (success)
+            {
+                _logger?.LogInformation("[Debugger] Multi-file build successful!");
+
+                return new AgentResponse
+                {
+                    Success = true,
+                    Output = "All files compiled successfully",
+                    Data = new Dictionary<string, object>
+                    {
+                        ["files"] = currentFiles,
+                        ["file_count"] = currentFiles.Count,
+                        ["attempts"] = attempts,
+                        ["build_output"] = output ?? ""
+                    }
+                };
+            }
+
+            // Build failed - try to fix
+            _logger?.LogWarning("[Debugger] Multi-file build failed. Error: {Error}", error);
+
+            // Parse error to identify which file has the issue
+            var (failedFile, failedCode) = IdentifyFailedFile(currentFiles, error ?? "");
+            
+            if (string.IsNullOrEmpty(failedFile) || string.IsNullOrEmpty(failedCode))
+            {
+                // Can't identify which file failed, try to fix the first file
+                failedFile = currentFiles.Keys.First();
+                failedCode = currentFiles[failedFile];
+            }
+
+            _logger?.LogInformation("[Debugger] Attempting to fix file: {File}", failedFile);
+
+            // Create context with all files for the fix
+            var allFilesContext = string.Join("\n\n", currentFiles.Select(f => $"// File: {f.Key}\n{f.Value}"));
+            var fixPrompt = $"The following project has multiple files. File '{failedFile}' has an error.\n\nALL FILES:\n{allFilesContext}\n\nERROR:\n{error}\n\nFix ONLY the file '{failedFile}'. Return the complete fixed content for that file only.";
+
+            var fixResponse = await TryFixCodeAsync(failedCode!, fixPrompt, cancellationToken);
+
+            if (!fixResponse.Success)
+            {
+                _logger?.LogError("[Debugger] Failed to generate fix for {File}", failedFile);
+                break;
+            }
+
+            var fixedCode = fixResponse.Output;
+
+            // Check if the fix is the same as before
+            if (fixedCode.Trim() == failedCode.Trim())
+            {
+                _logger?.LogWarning("[Debugger] Fix is identical to previous code. Breaking loop.");
+                break;
+            }
+
+            currentFiles[failedFile] = fixedCode;
+        }
+
+        // Failed after all retries
+        _logger?.LogError("[Debugger] Multi-file debug failed after {Attempts} attempts", attempts);
+
+        return new AgentResponse
+        {
+            Success = false,
+            Output = "Build failed",
+            Error = $"Failed to fix code after {attempts} attempts",
+            Data = new Dictionary<string, object>
+            {
+                ["files"] = currentFiles,
+                ["file_count"] = currentFiles.Count,
+                ["attempts"] = attempts,
+                ["logs"] = allLogs
+            }
+        };
+    }
+
+    private (string? FileName, string? Code) IdentifyFailedFile(Dictionary<string, string> files, string error)
+    {
+        // Try to extract filename from error message (e.g., "DateTimeHelper.cs(10,5): error CS...")
+        foreach (var file in files)
+        {
+            var fileName = Path.GetFileName(file.Key);
+            if (error.Contains(fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return (file.Key, file.Value);
+            }
+        }
+        return (null, null);
+    }
+
+    private async Task<(bool Success, string? Output, string? Error)> ExecuteMultipleCSharpFilesAsync(
+        Dictionary<string, string> files,
+        CancellationToken cancellationToken)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"aideveasy_multifile_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var projectFile = Path.Combine(tempDir, "TempProject.csproj");
+            var sourceFiles = new List<string>();
+
+            // Detect frameworks and features across all files
+            var allCode = string.Join("\n", files.Values);
+            
+            bool usesNUnit = allCode.Contains("NUnit.Framework") ||
+                             allCode.Contains("[TestFixture]") ||
+                             allCode.Contains("[Test]") ||
+                             allCode.Contains("[TestCase");
+            
+            bool usesMSTest = allCode.Contains("Microsoft.VisualStudio.TestTools.UnitTesting") ||
+                              allCode.Contains("[TestClass]") ||
+                              allCode.Contains("[TestMethod]");
+            
+            bool usesFluentAssertions = allCode.Contains("FluentAssertions") ||
+                                        allCode.Contains(".Should()");
+
+            bool usesNewtonsoft = allCode.Contains("Newtonsoft.Json") ||
+                                  allCode.Contains("JsonConvert");
+
+            // Write each file to the temp directory
+            foreach (var (filename, code) in files)
+            {
+                // Extract just the filename from the path for the temp project
+                var safeFileName = Path.GetFileName(filename);
+                if (string.IsNullOrEmpty(safeFileName))
+                {
+                    safeFileName = $"File_{sourceFiles.Count + 1}.cs";
+                }
+                
+                // Ensure unique filenames
+                var targetPath = Path.Combine(tempDir, safeFileName);
+                var counter = 1;
+                while (File.Exists(targetPath))
+                {
+                    var nameWithoutExt = Path.GetFileNameWithoutExtension(safeFileName);
+                    var ext = Path.GetExtension(safeFileName);
+                    targetPath = Path.Combine(tempDir, $"{nameWithoutExt}_{counter++}{ext}");
+                }
+
+                await File.WriteAllTextAsync(targetPath, code, cancellationToken);
+                sourceFiles.Add(Path.GetFileName(targetPath));
+                
+                _logger?.LogDebug("[Debugger] Written file: {File}", Path.GetFileName(targetPath));
+            }
+
+            // Generate compile items for all files
+            var compileItems = string.Join("\n    ", sourceFiles.Select(f => $@"<Compile Include=""{f}"" />"));
+
+            // Create .csproj file - always as Library since we're not running, just compiling
+            var csprojContent = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<Project ToolsVersion=""15.0"" xmlns=""http://schemas.microsoft.com/developer/msbuild/2003"">
+  <Import Project=""$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"" Condition=""Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')"" />
+  <PropertyGroup>
+    <Configuration Condition="" '$(Configuration)' == '' "">Debug</Configuration>
+    <Platform Condition="" '$(Platform)' == '' "">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <RootNamespace>TempProject</RootNamespace>
+    <AssemblyName>TempProject</AssemblyName>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <LangVersion>latest</LangVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
+  </PropertyGroup>
+  <PropertyGroup Condition="" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' "">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include=""System"" />
+    <Reference Include=""System.Core"" />
+    <Reference Include=""System.Data"" />
+    <Reference Include=""System.IO.Compression"" />
+    <Reference Include=""System.IO.Compression.FileSystem"" />
+    <Reference Include=""System.Net.Http"" />
+    <Reference Include=""System.Xml"" />
+    <Reference Include=""System.Xml.Linq"" />
+    <Reference Include=""Microsoft.CSharp"" />
+  </ItemGroup>
+  <ItemGroup>
+    {compileItems}
+  </ItemGroup>
+  <ItemGroup>
+    {(usesNUnit ? @"<PackageReference Include=""NUnit"" Version=""3.14.0"" />" : "")}
+    {(usesNUnit ? @"<PackageReference Include=""NUnit3TestAdapter"" Version=""4.5.0"" />" : "")}
+    {(usesMSTest ? @"<PackageReference Include=""MSTest.TestFramework"" Version=""3.1.1"" />" : "")}
+    {(usesFluentAssertions ? @"<PackageReference Include=""FluentAssertions"" Version=""6.12.0"" />" : "")}
+    {(usesNewtonsoft ? @"<PackageReference Include=""Newtonsoft.Json"" Version=""13.0.3"" />" : "")}
+  </ItemGroup>
+  <Import Project=""$(MSBuildToolsPath)\Microsoft.CSharp.targets"" />
+</Project>";
+
+            await File.WriteAllTextAsync(projectFile, csprojContent, cancellationToken);
+
+            _logger?.LogInformation("[Debugger] Created multi-file project with {Count} files", sourceFiles.Count);
+
+            // Find MSBuild
+            var msbuildPath = FindMSBuildPath();
+            if (string.IsNullOrEmpty(msbuildPath))
+            {
+                _logger?.LogWarning("[Debugger] MSBuild not found, performing syntax check only");
+                return (true, "MSBuild not found - syntax appears valid", null);
+            }
+
+            // Compile with MSBuild
+            var compileResult = await CompileWithMSBuildAsync(msbuildPath, projectFile, cancellationToken);
+            if (!compileResult.Success)
+            {
+                return (false, null, compileResult.Error);
+            }
+
+            _logger?.LogInformation("[Debugger] Multi-file compilation successful");
+            return (true, "All files compiled successfully", null);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
     private async Task<(bool Success, string? Output, string? Error)> ExecuteCodeAsync(
         string code,
         CancellationToken cancellationToken)
@@ -297,9 +562,12 @@ IMPORTANT: Always output the COMPLETE fixed file, not just the changed lines.";
   <ItemGroup>
     <Reference Include=""System"" />
     <Reference Include=""System.Core"" />
+    <Reference Include=""System.Data"" />
     <Reference Include=""System.IO.Compression"" />
     <Reference Include=""System.IO.Compression.FileSystem"" />
     <Reference Include=""System.Net.Http"" />
+    <Reference Include=""System.Xml"" />
+    <Reference Include=""System.Xml.Linq"" />
     <Reference Include=""Microsoft.CSharp"" />
   </ItemGroup>
   <ItemGroup>

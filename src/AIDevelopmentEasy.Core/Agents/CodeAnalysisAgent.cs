@@ -120,11 +120,14 @@ public class CodeAnalysisAgent
 
     private async Task<ProjectInfo> ParseProjectFileAsync(string projPath, string basePath, CancellationToken cancellationToken)
     {
+        var projectDir = Path.GetDirectoryName(projPath)!;
+        
         var projectInfo = new ProjectInfo
         {
             Name = Path.GetFileNameWithoutExtension(projPath),
             Path = projPath,
-            RelativePath = GetRelativePath(projPath, basePath)
+            RelativePath = GetRelativePath(projPath, basePath),
+            ProjectDirectory = GetRelativePath(projectDir, basePath)
         };
 
         try
@@ -140,6 +143,9 @@ public class CodeAnalysisAgent
 
             // Get output type
             projectInfo.OutputType = doc.Descendants(ns + "OutputType").FirstOrDefault()?.Value ?? "Library";
+
+            // Try to get RootNamespace from csproj
+            projectInfo.RootNamespace = doc.Descendants(ns + "RootNamespace").FirstOrDefault()?.Value ?? "";
 
             // Get project references
             foreach (var projRef in doc.Descendants(ns + "ProjectReference"))
@@ -167,25 +173,42 @@ public class CodeAnalysisAgent
             _logger?.LogWarning(ex, "Error parsing project file: {Path}", projPath);
         }
 
-        // Parse C# files in project directory
-        var projectDir = Path.GetDirectoryName(projPath)!;
+        // Parse C# files in project directory - collect namespace-path pairs for mapping
+        var namespacePathPairs = new List<(string Namespace, string RelativeFolderPath)>();
+        
         var csFiles = Directory.GetFiles(projectDir, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("\\obj\\") && !f.Contains("\\bin\\"))
+            .Where(f => !f.Contains("\\obj\\") && !f.Contains("\\bin\\") && !f.Contains("/obj/") && !f.Contains("/bin/"))
             .ToList();
 
         foreach (var csFile in csFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ParseCSharpFileAsync(csFile, basePath, projectInfo);
+            
+            // Parse the file and collect namespace-path pair
+            var nsPathPair = await ParseCSharpFileWithPathAsync(csFile, projectDir, basePath, projectInfo);
+            if (nsPathPair.HasValue)
+            {
+                namespacePathPairs.Add(nsPathPair.Value);
+            }
         }
+
+        // Calculate root namespace and namespace-folder mappings
+        CalculateNamespaceMappings(projectInfo, namespacePathPairs);
 
         // Detect patterns at project level
         projectInfo.DetectedPatterns = DetectProjectPatterns(projectInfo);
 
+        _logger?.LogDebug("[CodeAnalysis] Project {Name}: RootNS={RootNS}, Mappings={Count}",
+            projectInfo.Name, projectInfo.RootNamespace, projectInfo.NamespaceFolderMap.Count);
+
         return projectInfo;
     }
 
-    private async Task ParseCSharpFileAsync(string csPath, string basePath, ProjectInfo projectInfo)
+    /// <summary>
+    /// Parse a C# file and return namespace-path pair for mapping calculation
+    /// </summary>
+    private async Task<(string Namespace, string RelativeFolderPath)?> ParseCSharpFileWithPathAsync(
+        string csPath, string projectDir, string basePath, ProjectInfo projectInfo)
     {
         try
         {
@@ -194,12 +217,14 @@ public class CodeAnalysisAgent
 
             // Extract namespace
             var nsMatch = NamespaceRegex.Match(content);
+            string? fileNamespace = null;
+            
             if (nsMatch.Success)
             {
-                var ns = nsMatch.Groups[1].Value;
-                if (!projectInfo.Namespaces.Contains(ns))
+                fileNamespace = nsMatch.Groups[1].Value;
+                if (!projectInfo.Namespaces.Contains(fileNamespace))
                 {
-                    projectInfo.Namespaces.Add(ns);
+                    projectInfo.Namespaces.Add(fileNamespace);
                 }
             }
 
@@ -218,7 +243,7 @@ public class CodeAnalysisAgent
                 var typeInfo = new TypeInfo
                 {
                     Name = className,
-                    Namespace = nsMatch.Success ? nsMatch.Groups[1].Value : "",
+                    Namespace = fileNamespace ?? "",
                     FilePath = relativePath,
                     BaseTypes = baseTypes,
                     Modifiers = modifiers,
@@ -245,7 +270,7 @@ public class CodeAnalysisAgent
                 var typeInfo = new TypeInfo
                 {
                     Name = interfaceName,
-                    Namespace = nsMatch.Success ? nsMatch.Groups[1].Value : "",
+                    Namespace = fileNamespace ?? "",
                     FilePath = relativePath,
                     BaseTypes = baseTypes,
                     Modifiers = modifiers,
@@ -254,11 +279,130 @@ public class CodeAnalysisAgent
 
                 projectInfo.Interfaces.Add(typeInfo);
             }
+
+            // Calculate relative folder path from project directory
+            if (!string.IsNullOrEmpty(fileNamespace))
+            {
+                var fileDir = Path.GetDirectoryName(csPath) ?? "";
+                var relativeFolderPath = GetRelativePath(fileDir, projectDir);
+                // Normalize to empty string if it's "." or current directory
+                if (relativeFolderPath == "." || string.IsNullOrEmpty(relativeFolderPath))
+                {
+                    relativeFolderPath = "";
+                }
+                return (fileNamespace, relativeFolderPath);
+            }
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Error parsing C# file: {Path}", csPath);
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Calculate root namespace and namespace-to-folder mappings from collected pairs
+    /// </summary>
+    private void CalculateNamespaceMappings(ProjectInfo projectInfo, List<(string Namespace, string RelativeFolderPath)> pairs)
+    {
+        if (pairs.Count == 0)
+            return;
+
+        // Find the root namespace - the shortest common prefix among all namespaces
+        // Or use the most common namespace in root folder files
+        var rootFolderNamespaces = pairs
+            .Where(p => string.IsNullOrEmpty(p.RelativeFolderPath))
+            .Select(p => p.Namespace)
+            .ToList();
+
+        if (rootFolderNamespaces.Any())
+        {
+            // Use the most common namespace from root folder
+            projectInfo.RootNamespace = rootFolderNamespaces
+                .GroupBy(n => n)
+                .OrderByDescending(g => g.Count())
+                .First()
+                .Key;
+        }
+        else if (!string.IsNullOrEmpty(projectInfo.RootNamespace))
+        {
+            // Already set from csproj
+        }
+        else
+        {
+            // Find the shortest common prefix
+            var allNamespaces = pairs.Select(p => p.Namespace).Distinct().OrderBy(n => n.Length).ToList();
+            projectInfo.RootNamespace = FindCommonNamespacePrefix(allNamespaces);
+        }
+
+        // Build namespace suffix to folder mapping
+        var rootNs = projectInfo.RootNamespace;
+        
+        foreach (var (ns, folderPath) in pairs.Distinct())
+        {
+            string nsSuffix;
+            
+            if (ns.Equals(rootNs, StringComparison.OrdinalIgnoreCase))
+            {
+                nsSuffix = ""; // Root namespace maps to project root
+            }
+            else if (ns.StartsWith(rootNs + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                nsSuffix = ns.Substring(rootNs.Length + 1);
+            }
+            else
+            {
+                // Namespace doesn't start with root - use full namespace as key
+                nsSuffix = ns;
+            }
+
+            // Normalize folder path (use forward slashes for consistency)
+            var normalizedFolder = folderPath.Replace('\\', '/');
+            
+            // Store mapping if not already present
+            if (!projectInfo.NamespaceFolderMap.ContainsKey(nsSuffix))
+            {
+                projectInfo.NamespaceFolderMap[nsSuffix] = normalizedFolder;
+            }
+        }
+
+        // Ensure root mapping exists
+        if (!projectInfo.NamespaceFolderMap.ContainsKey(""))
+        {
+            projectInfo.NamespaceFolderMap[""] = "";
+        }
+    }
+
+    /// <summary>
+    /// Find the common namespace prefix among a list of namespaces
+    /// </summary>
+    private string FindCommonNamespacePrefix(List<string> namespaces)
+    {
+        if (namespaces.Count == 0) return "";
+        if (namespaces.Count == 1) return namespaces[0];
+
+        var first = namespaces[0].Split('.');
+        var prefixLength = first.Length;
+
+        foreach (var ns in namespaces.Skip(1))
+        {
+            var parts = ns.Split('.');
+            var commonLength = 0;
+            
+            for (int i = 0; i < Math.Min(prefixLength, parts.Length); i++)
+            {
+                if (first[i].Equals(parts[i], StringComparison.OrdinalIgnoreCase))
+                    commonLength++;
+                else
+                    break;
+            }
+            
+            prefixLength = commonLength;
+            if (prefixLength == 0) break;
+        }
+
+        return string.Join(".", first.Take(prefixLength));
     }
 
     private void ExtractMembers(string content, TypeInfo typeInfo)
@@ -828,15 +972,20 @@ public class CodeAnalysisAgent
         var sb = new System.Text.StringBuilder();
 
         sb.AppendLine($"## Codebase: {analysis.CodebaseName}");
+        sb.AppendLine($"Path: {analysis.CodebasePath}");
         sb.AppendLine($"Framework: {analysis.Summary.PrimaryFramework}");
         sb.AppendLine($"Projects: {analysis.Summary.TotalProjects}, Classes: {analysis.Summary.TotalClasses}, Interfaces: {analysis.Summary.TotalInterfaces}");
         sb.AppendLine();
 
-        sb.AppendLine("### Projects:");
-        foreach (var proj in analysis.Projects.OrderBy(p => p.Name))
+        // Separate main projects and test projects
+        var mainProjects = analysis.Projects.Where(p => !p.IsTestProject).OrderBy(p => p.Name).ToList();
+        var testProjects = analysis.Projects.Where(p => p.IsTestProject).OrderBy(p => p.Name).ToList();
+
+        sb.AppendLine("### Main Projects:");
+        foreach (var proj in mainProjects)
         {
-            var projType = proj.IsTestProject ? "Test" : proj.OutputType;
-            sb.AppendLine($"- **{proj.Name}** ({projType}, {proj.TargetFramework})");
+            sb.AppendLine($"- **{proj.Name}** ({proj.OutputType}, {proj.TargetFramework})");
+            sb.AppendLine($"  - Path: {proj.RelativePath}");
 
             if (proj.ProjectReferences.Any())
             {
@@ -848,23 +997,84 @@ public class CodeAnalysisAgent
                 sb.AppendLine($"  - Patterns: {string.Join(", ", proj.DetectedPatterns)}");
             }
 
-            // List key interfaces
-            if (proj.Interfaces.Any())
+            // Show folder structure with example files
+            var folderGroups = proj.Classes
+                .Where(c => !string.IsNullOrEmpty(c.FilePath))
+                .GroupBy(c => Path.GetDirectoryName(c.FilePath)?.Replace("\\", "/") ?? "")
+                .Where(g => !string.IsNullOrEmpty(g.Key))
+                .OrderBy(g => g.Key)
+                .Take(10)
+                .ToList();
+
+            if (folderGroups.Any())
             {
-                var keyInterfaces = proj.Interfaces.Take(5).Select(i => i.Name);
-                sb.AppendLine($"  - Key Interfaces: {string.Join(", ", keyInterfaces)}");
+                sb.AppendLine($"  - Folder Structure:");
+                foreach (var folder in folderGroups)
+                {
+                    var folderName = folder.Key;
+                    var exampleClasses = folder.Take(3).Select(c => $"{c.Name} ({c.Namespace})");
+                    sb.AppendLine($"    - {folderName}/");
+                    foreach (var cls in folder.Take(3))
+                    {
+                        sb.AppendLine($"      - {cls.Name}.cs → namespace {cls.Namespace}");
+                    }
+                    if (folder.Count() > 3)
+                    {
+                        sb.AppendLine($"      - ... and {folder.Count() - 3} more");
+                    }
+                }
             }
 
-            // List key classes
-            if (proj.Classes.Any())
+            // List key interfaces with paths
+            if (proj.Interfaces.Any())
             {
-                var keyClasses = proj.Classes
-                    .Where(c => !string.IsNullOrEmpty(c.DetectedPattern))
-                    .Take(5)
-                    .Select(c => c.Name);
-                if (keyClasses.Any())
+                var keyInterfaces = proj.Interfaces.Take(5);
+                sb.AppendLine($"  - Key Interfaces:");
+                foreach (var iface in keyInterfaces)
                 {
-                    sb.AppendLine($"  - Key Classes: {string.Join(", ", keyClasses)}");
+                    sb.AppendLine($"    - {iface.Name} ({iface.FilePath})");
+                }
+            }
+        }
+
+        // Test Project Mapping
+        sb.AppendLine();
+        sb.AppendLine("### Test Projects (Unit Tests go here):");
+        foreach (var testProj in testProjects)
+        {
+            // Find corresponding main project
+            var mainProjName = testProj.Name
+                .Replace(".UnitTest", "")
+                .Replace(".Tests", "")
+                .Replace(".Test", "");
+            
+            var mainProj = mainProjects.FirstOrDefault(p => 
+                p.Name.Equals(mainProjName, StringComparison.OrdinalIgnoreCase) ||
+                p.Name.StartsWith(mainProjName, StringComparison.OrdinalIgnoreCase));
+
+            sb.AppendLine($"- **{testProj.Name}**");
+            sb.AppendLine($"  - Path: {testProj.RelativePath}");
+            if (mainProj != null)
+            {
+                sb.AppendLine($"  - Tests for: {mainProj.Name}");
+            }
+
+            // Show test folder structure
+            var testFolders = testProj.Classes
+                .Where(c => !string.IsNullOrEmpty(c.FilePath))
+                .GroupBy(c => Path.GetDirectoryName(c.FilePath)?.Replace("\\", "/") ?? "")
+                .Take(5)
+                .ToList();
+
+            if (testFolders.Any())
+            {
+                sb.AppendLine($"  - Test Files:");
+                foreach (var folder in testFolders)
+                {
+                    foreach (var testClass in folder.Take(2))
+                    {
+                        sb.AppendLine($"    - {testClass.FilePath}");
+                    }
                 }
             }
         }
@@ -877,6 +1087,13 @@ public class CodeAnalysisAgent
         if (!string.IsNullOrEmpty(analysis.Conventions.DIFramework))
             sb.AppendLine($"- DI framework: {analysis.Conventions.DIFramework}");
         sb.AppendLine($"- Async suffix: {(analysis.Conventions.UsesAsyncSuffix ? "Yes" : "No")}");
+
+        sb.AppendLine();
+        sb.AppendLine("### IMPORTANT - File Placement Rules:");
+        sb.AppendLine("- New Helper classes → [ProjectName]/Helpers/[HelperName].cs");
+        sb.AppendLine("- New Service classes → [ProjectName]/Services/[ServiceName].cs");
+        sb.AppendLine("- Unit tests → Tests/[ProjectName].UnitTest/[ClassName]Tests.cs");
+        sb.AppendLine("- Follow existing namespace conventions in each folder");
 
         return sb.ToString();
     }

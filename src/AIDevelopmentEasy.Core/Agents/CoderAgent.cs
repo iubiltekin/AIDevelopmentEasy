@@ -70,6 +70,11 @@ Guidelines:
 - Use explicit types (avoid var when type is not obvious)
 - Implement IDisposable when managing unmanaged resources
 
+Namespace Handling (CRITICAL):
+- When a target namespace is specified, ALWAYS use it exactly as provided
+- The namespace should match the folder structure (e.g., Picus.Common.Helpers for Helpers/ folder)
+- Do NOT invent or modify the namespace
+
 .NET Framework 4.6.2 Specific:
 - Use System.Net.Http.HttpClient (not HttpClientFactory)
 - Use Task-based async/await patterns
@@ -99,12 +104,22 @@ Testing with NUnit and FluentAssertions:
 Output Format:
 - Output ONLY the code in a markdown code block
 - Include ALL necessary using statements
-- If it's a class, include the full class definition
+- If it's a class, include the full class definition WITH CORRECT NAMESPACE
 - If modifying existing code, output the complete updated file
 
 ```csharp
 using System;
-// Your code here
+
+namespace ProjectName.FolderName  // Use the provided namespace exactly
+{
+    /// <summary>
+    /// XML documentation
+    /// </summary>
+    public class ClassName
+    {
+        // Your implementation here
+    }
+}
 ```
 
 IMPORTANT: Output ONLY code in a single code block. No explanations before or after unless as code comments.";

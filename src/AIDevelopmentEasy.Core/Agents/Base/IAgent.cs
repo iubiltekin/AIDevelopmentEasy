@@ -174,6 +174,12 @@ public record SubTask
     /// Used for reading and writing file content.
     /// </summary>
     public string? FullPath { get; init; }
+    
+    /// <summary>
+    /// Target namespace for the generated code.
+    /// Helps ensure correct namespace declaration.
+    /// </summary>
+    public string? Namespace { get; init; }
 }
 
 public enum SubTaskStatus

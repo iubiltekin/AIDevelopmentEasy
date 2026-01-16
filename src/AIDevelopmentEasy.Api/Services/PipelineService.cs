@@ -40,6 +40,7 @@ public class PipelineService : IPipelineService
     private readonly DebuggerAgent _debuggerAgent;
     private readonly ReviewerAgent _reviewerAgent;
     private readonly CodeAnalysisAgent _codeAnalysisAgent;
+    private readonly DeploymentAgent _deploymentAgent;
     private readonly ILogger<PipelineService> _logger;
 
     // Track running pipelines and their state
@@ -57,6 +58,7 @@ public class PipelineService : IPipelineService
         DebuggerAgent debuggerAgent,
         ReviewerAgent reviewerAgent,
         CodeAnalysisAgent codeAnalysisAgent,
+        DeploymentAgent deploymentAgent,
         ILogger<PipelineService> logger)
     {
         _requirementRepository = requirementRepository;
@@ -70,6 +72,7 @@ public class PipelineService : IPipelineService
         _debuggerAgent = debuggerAgent;
         _reviewerAgent = reviewerAgent;
         _codeAnalysisAgent = codeAnalysisAgent;
+        _deploymentAgent = deploymentAgent;
         _logger = logger;
     }
 
@@ -207,13 +210,17 @@ public class PipelineService : IPipelineService
             }
 
             var requirement = await _requirementRepository.GetByIdAsync(requirementId, ct);
+            if (requirement == null)
+            {
+                throw new InvalidOperationException($"Requirement not found: {requirementId}");
+            }
 
             // Phase 1: Analysis (optional - only when codebase is linked)
             Core.Models.CodebaseAnalysis? codebaseAnalysis = null;
             ClassSearchResult? classResult = null;
             ReferenceSearchResult? referenceResult = null;
             
-            if (!string.IsNullOrEmpty(requirement?.CodebaseId))
+            if (!string.IsNullOrEmpty(requirement.CodebaseId))
             {
                 var analysisResult = await ExecutePhaseAsync(execution, PipelinePhase.Analysis, async () =>
                 {
@@ -483,52 +490,62 @@ public class PipelineService : IPipelineService
                     "DebuggerAgent verifying and fixing code...");
 
                 var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
-                var projectState = new ProjectState
+                
+                if (files.Count == 0)
                 {
-                    Requirement = content,
-                    Codebase = files
-                };
-
-                await _notificationService.NotifyProgressAsync(requirementId, $"Checking {files.Count} generated files...");
-
-                // Run debugger agent for verification
-                var verificationResults = new List<object>();
-                foreach (var (filename, code) in files)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    
-                    var request = new AgentRequest
-                    {
-                        Input = $"Verify this code compiles correctly and has no bugs:\n\n{code}",
-                        ProjectState = projectState,
-                        Context = new Dictionary<string, string> { ["filename"] = filename }
+                    await _notificationService.NotifyProgressAsync(requirementId, "No files to verify");
+                    return new 
+                    { 
+                        Success = true, 
+                        TotalFiles = 0,
+                        Message = "No files generated to verify"
                     };
-                    
-                    var response = await _debuggerAgent.RunAsync(request, ct);
-                    var hasIssues = response.Data.TryGetValue("has_issues", out var issues) && (bool)issues;
-                    
-                    verificationResults.Add(new { 
-                        Filename = filename, 
-                        Passed = !hasIssues,
-                        Issues = hasIssues ? response.Data.GetValueOrDefault("issues", "") : null
-                    });
                 }
 
-                var failedCount = verificationResults.Count(r => 
-                    r.GetType().GetProperty("Passed")?.GetValue(r) is false);
+                await _notificationService.NotifyProgressAsync(requirementId, $"Building {files.Count} files together...");
 
-                await _notificationService.NotifyProgressAsync(requirementId, 
-                    failedCount == 0 
-                        ? "All files verified successfully" 
-                        : $"{failedCount} file(s) need attention");
+                // Use multi-file debugging - compile all files together in a single project
+                // This allows test files to reference their implementation files
+                var debugResponse = await _debuggerAgent.DebugMultipleFilesAsync(files, ct);
+
+                ct.ThrowIfCancellationRequested();
+
+                if (debugResponse.Success)
+                {
+                    await _notificationService.NotifyProgressAsync(requirementId, "All files compiled successfully!");
+                    
+                    // Update files if they were fixed
+                    if (debugResponse.Data.TryGetValue("files", out var fixedFilesObj) && 
+                        fixedFilesObj is Dictionary<string, string> fixedFiles)
+                    {
+                        // Save any fixed files back to output
+                        foreach (var (filename, code) in fixedFiles)
+                        {
+                            if (files.TryGetValue(filename, out var originalCode) && originalCode != code)
+                            {
+                                _logger.LogInformation("[Debugging] File was fixed: {Filename}", filename);
+                                // The fixed code is already in the response
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    await _notificationService.NotifyProgressAsync(requirementId, 
+                        $"Build failed: {debugResponse.Error ?? "Unknown error"}");
+                }
+
+                var attempts = debugResponse.Data.TryGetValue("attempts", out var attemptsObj) 
+                    ? Convert.ToInt32(attemptsObj) 
+                    : 1;
 
                 return new 
                 { 
-                    Success = failedCount == 0, 
+                    Success = debugResponse.Success, 
                     TotalFiles = files.Count,
-                    PassedFiles = files.Count - failedCount,
-                    FailedFiles = failedCount,
-                    Results = verificationResults
+                    BuildOutput = debugResponse.Data.GetValueOrDefault("build_output", ""),
+                    Attempts = attempts,
+                    Error = debugResponse.Error
                 };
             }, ct);
 
@@ -567,6 +584,77 @@ public class PipelineService : IPipelineService
             }, ct);
 
             if (!reviewResult.Approved) return;
+
+            // Phase 6: Deployment (DeploymentAgent - deploy to codebase and build)
+            // Only run if a codebase is associated
+            var deployCodebaseId = requirement.CodebaseId;
+            if (!string.IsNullOrEmpty(deployCodebaseId))
+            {
+                var deployResult = await ExecutePhaseAsync(execution, PipelinePhase.Deployment, async () =>
+                {
+                    await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Deployment, 
+                        "DeploymentAgent deploying to codebase...");
+
+                    // Get the codebase path
+                    var codebaseAnalysis = await _codebaseRepository.GetAnalysisAsync(deployCodebaseId, ct);
+                    if (codebaseAnalysis == null || string.IsNullOrEmpty(codebaseAnalysis.CodebasePath))
+                    {
+                        return new 
+                        { 
+                            Success = false, 
+                            Error = "Codebase not found or path not set"
+                        };
+                    }
+
+                    await _notificationService.NotifyProgressAsync(requirementId, $"Deploying to: {codebaseAnalysis.CodebasePath}");
+                    await _notificationService.NotifyProgressAsync(requirementId, 
+                        $"Found {codebaseAnalysis.Projects.Count} projects in codebase");
+
+                    // Get generated files
+                    var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                    if (files.Count == 0)
+                    {
+                        return new 
+                        { 
+                            Success = true, 
+                            Message = "No files to deploy"
+                        };
+                    }
+
+                    await _notificationService.NotifyProgressAsync(requirementId, $"Deploying {files.Count} files...");
+
+                    // Deploy files to codebase using full analysis for accurate project paths
+                    var deploymentResult = await _deploymentAgent.DeployAsync(codebaseAnalysis, files, ct);
+
+                    if (deploymentResult.Success)
+                    {
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            $"Deployment successful! {deploymentResult.TotalFilesCopied} files deployed, build passed.");
+                    }
+                    else
+                    {
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            $"Deployment failed: {deploymentResult.Error}");
+                    }
+
+                    return new 
+                    { 
+                        Success = deploymentResult.Success,
+                        Error = deploymentResult.Error,
+                        FilesCopied = deploymentResult.TotalFilesCopied,
+                        NewFiles = deploymentResult.NewFilesCreated,
+                        ModifiedFiles = deploymentResult.FilesModified,
+                        BuildResults = deploymentResult.BuildResults.Select(b => new 
+                        { 
+                            b.Success, 
+                            b.TargetPath, 
+                            b.Error 
+                        }).ToList()
+                    };
+                }, ct);
+
+                if (!deployResult.Approved) return;
+            }
 
             // Mark as completed (this also clears InProgress)
             await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Completed, ct);
@@ -664,11 +752,12 @@ public class PipelineService : IPipelineService
             IsRunning = false,
             Phases = new List<PhaseStatusDto>
             {
-                new() { Phase = PipelinePhase.Analysis, State = PhaseState.Pending },   // CodeAnalysisAgent
-                new() { Phase = PipelinePhase.Planning, State = PhaseState.Pending },   // PlannerAgent
-                new() { Phase = PipelinePhase.Coding, State = PhaseState.Pending },     // CoderAgent
-                new() { Phase = PipelinePhase.Debugging, State = PhaseState.Pending },  // DebuggerAgent
-                new() { Phase = PipelinePhase.Reviewing, State = PhaseState.Pending }   // ReviewerAgent
+                new() { Phase = PipelinePhase.Analysis, State = PhaseState.Pending },    // CodeAnalysisAgent
+                new() { Phase = PipelinePhase.Planning, State = PhaseState.Pending },    // PlannerAgent
+                new() { Phase = PipelinePhase.Coding, State = PhaseState.Pending },      // CoderAgent
+                new() { Phase = PipelinePhase.Debugging, State = PhaseState.Pending },   // DebuggerAgent
+                new() { Phase = PipelinePhase.Reviewing, State = PhaseState.Pending },   // ReviewerAgent
+                new() { Phase = PipelinePhase.Deployment, State = PhaseState.Pending }   // DeploymentAgent
             }
         };
     }
@@ -721,7 +810,8 @@ public class PipelineService : IPipelineService
                         Status = Models.TaskStatus.Pending,
                         UsesExisting = st.UsesExisting,
                         IsModification = st.IsModification,
-                        FullPath = st.FullPath ?? matchingModTask?.FullPath
+                        FullPath = st.FullPath ?? matchingModTask?.FullPath,
+                        Namespace = st.Namespace
                     });
                 }
                 projectOrder++;

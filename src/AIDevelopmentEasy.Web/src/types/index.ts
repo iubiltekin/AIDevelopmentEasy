@@ -22,12 +22,13 @@ export enum TaskStatus {
 
 export enum PipelinePhase {
   None = 0,
-  Analysis = 1,   // CodeAnalysisAgent - Codebase analysis (optional)
-  Planning = 2,   // PlannerAgent - Task decomposition
-  Coding = 3,     // CoderAgent - Code generation/modification
-  Debugging = 4,  // DebuggerAgent - Testing and fixing
-  Reviewing = 5,  // ReviewerAgent - Quality review
-  Completed = 6
+  Analysis = 1,    // CodeAnalysisAgent - Codebase analysis (optional)
+  Planning = 2,    // PlannerAgent - Task decomposition
+  Coding = 3,      // CoderAgent - Code generation/modification
+  Debugging = 4,   // DebuggerAgent - Testing and fixing
+  Reviewing = 5,   // ReviewerAgent - Quality review
+  Deployment = 6,  // DeploymentAgent - Deploy to codebase and build
+  Completed = 7
 }
 
 export enum PhaseState {
@@ -51,6 +52,7 @@ export interface TaskDto {
   usesExisting?: string[];
   isModification?: boolean;  // true = modify existing file, false = create new file
   fullPath?: string;         // full path to target file for modifications
+  namespace?: string;        // target namespace for generated code
 }
 
 export interface RequirementDto {
@@ -200,6 +202,7 @@ export function getPhaseLabel(phase: PipelinePhase): string {
     [PipelinePhase.Coding]: 'Coding',
     [PipelinePhase.Debugging]: 'Debugging',
     [PipelinePhase.Reviewing]: 'Reviewing',
+    [PipelinePhase.Deployment]: 'Deployment',
     [PipelinePhase.Completed]: 'Completed'
   };
   return labels[phase] || 'Unknown';
@@ -214,6 +217,7 @@ export function getPhaseDescription(phase: PipelinePhase): string {
     [PipelinePhase.Coding]: 'CoderAgent generating or modifying code',
     [PipelinePhase.Debugging]: 'DebuggerAgent verifying and fixing code',
     [PipelinePhase.Reviewing]: 'ReviewerAgent checking code quality',
+    [PipelinePhase.Deployment]: 'DeploymentAgent deploying code to codebase and building',
     [PipelinePhase.Completed]: 'Pipeline completed successfully'
   };
   return descriptions[phase] || '';
@@ -228,6 +232,7 @@ export function getPhaseAgent(phase: PipelinePhase): string | null {
     [PipelinePhase.Coding]: 'CoderAgent',
     [PipelinePhase.Debugging]: 'DebuggerAgent',
     [PipelinePhase.Reviewing]: 'ReviewerAgent',
+    [PipelinePhase.Deployment]: 'DeploymentAgent',
     [PipelinePhase.Completed]: null
   };
   return agents[phase];

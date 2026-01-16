@@ -58,11 +58,23 @@ public class ProjectInfo
     [JsonPropertyName("relative_path")]
     public string RelativePath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Directory containing the .csproj file (relative to codebase root)
+    /// </summary>
+    [JsonPropertyName("project_directory")]
+    public string ProjectDirectory { get; set; } = string.Empty;
+
     [JsonPropertyName("target_framework")]
     public string TargetFramework { get; set; } = string.Empty;
 
     [JsonPropertyName("output_type")]
     public string OutputType { get; set; } = "Library";
+
+    /// <summary>
+    /// The root/primary namespace of the project (determined from analysis)
+    /// </summary>
+    [JsonPropertyName("root_namespace")]
+    public string RootNamespace { get; set; } = string.Empty;
 
     [JsonPropertyName("project_references")]
     public List<string> ProjectReferences { get; set; } = new();
@@ -72,6 +84,14 @@ public class ProjectInfo
 
     [JsonPropertyName("namespaces")]
     public List<string> Namespaces { get; set; } = new();
+
+    /// <summary>
+    /// Maps namespace suffixes to relative folder paths within the project.
+    /// E.g., "Helpers" -> "Helpers", "Services.Internal" -> "Services/Internal"
+    /// Empty string key "" maps to project root directory.
+    /// </summary>
+    [JsonPropertyName("namespace_folder_map")]
+    public Dictionary<string, string> NamespaceFolderMap { get; set; } = new();
 
     [JsonPropertyName("classes")]
     public List<TypeInfo> Classes { get; set; } = new();
@@ -86,7 +106,7 @@ public class ProjectInfo
     /// Is this a test project?
     /// </summary>
     [JsonIgnore]
-    public bool IsTestProject => Name.EndsWith(".Tests") || Name.EndsWith(".Test") || 
+    public bool IsTestProject => Name.EndsWith(".Tests") || Name.EndsWith(".Test") ||
                                   DetectedPatterns.Contains("UnitTest");
 }
 

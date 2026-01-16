@@ -47,6 +47,12 @@ public class TaskDto
     /// Used for reading existing file content when IsModification is true.
     /// </summary>
     public string? FullPath { get; set; }
+
+    /// <summary>
+    /// Target namespace for the generated code.
+    /// Helps ensure correct namespace declaration.
+    /// </summary>
+    public string? Namespace { get; set; }
 }
 
 /// <summary>
@@ -200,6 +206,7 @@ public enum PipelinePhase
     Coding,      // CoderAgent - Code generation/modification
     Debugging,   // DebuggerAgent - Testing and fixing
     Reviewing,   // ReviewerAgent - Quality review
+    Deployment,  // DeploymentAgent - Deploy to codebase and build
     Completed
 }
 

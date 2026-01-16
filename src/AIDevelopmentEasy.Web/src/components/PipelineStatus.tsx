@@ -1,4 +1,4 @@
-import { Check, Clock, Loader2, AlertCircle, SkipForward, Circle, Search, ListTodo, Code, Bug, FileCheck } from 'lucide-react';
+import { Check, Clock, Loader2, AlertCircle, SkipForward, Circle, Search, ListTodo, Code, Bug, FileCheck, Rocket } from 'lucide-react';
 import { 
   PipelineStatusDto, 
   PhaseState, 
@@ -43,6 +43,8 @@ export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusPr
         return <Bug className="w-5 h-5" />;
       case PipelinePhase.Reviewing:
         return <FileCheck className="w-5 h-5" />;
+      case PipelinePhase.Deployment:
+        return <Rocket className="w-5 h-5" />;
       default:
         return <Circle className="w-5 h-5" />;
     }

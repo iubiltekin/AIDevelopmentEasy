@@ -161,6 +161,9 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
     new ReviewerAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<ReviewerAgent>>()));
 
+builder.Services.AddSingleton(sp =>
+    new DeploymentAgent(sp.GetRequiredService<ILogger<DeploymentAgent>>()));
+
 // Pipeline Services
 builder.Services.AddSingleton<IPipelineNotificationService, SignalRPipelineNotificationService>();
 builder.Services.AddSingleton<IPipelineService, PipelineService>();
