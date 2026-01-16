@@ -27,9 +27,36 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 |------------|---------|
 | **.NET 8** | AIDevelopmentEasy runtime |
 | **Azure OpenAI (GPT-4o)** | LLM API - code generation and analysis |
+| **ASP.NET Core Web API** | REST API with SignalR real-time updates |
 | **MSBuild** | Compilation of generated C# code |
 | **Microsoft.Extensions.DependencyInjection** | SOLID-compliant DI container |
 | **Serilog** | Structured logging |
+
+## Running Modes
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| **CLI (Interactive)** | `dotnet run --project src/AIDevelopmentEasy.CLI` | Terminal-based interactive workflow |
+| **Web API** | `dotnet run --project src/AIDevelopmentEasy.Api` | REST API + SignalR for web clients |
+
+### Web API Endpoints
+
+```
+GET  /api/requirements              - List all requirements
+GET  /api/requirements/{id}         - Get requirement details
+POST /api/requirements              - Create new requirement
+DEL  /api/requirements/{id}         - Delete requirement
+POST /api/requirements/{id}/reset   - Reset requirement status
+
+POST /api/pipeline/{id}/start       - Start processing
+GET  /api/pipeline/{id}/status      - Get pipeline status
+POST /api/pipeline/{id}/approve/{phase} - Approve a phase
+POST /api/pipeline/{id}/reject/{phase}  - Reject a phase
+POST /api/pipeline/{id}/cancel      - Cancel pipeline
+
+SignalR Hub: /hubs/pipeline         - Real-time updates
+Swagger UI:  /swagger               - API documentation
+```
 
 ## Architecture
 
@@ -263,6 +290,15 @@ AIDevelopmentEasy/
 ├── 📄 LICENSE
 │
 ├── 📁 src/
+│   ├── 📁 AIDevelopmentEasy.Api/        # Web API (REST + SignalR)
+│   │   ├── Controllers/                 # API endpoints
+│   │   ├── Hubs/                        # SignalR hubs
+│   │   ├── Models/                      # DTOs
+│   │   ├── Repositories/                # Data access abstraction
+│   │   │   ├── Interfaces/              # Repository contracts
+│   │   │   └── FileSystem/              # File-based implementations
+│   │   └── Services/                    # Business logic
+│   │
 │   ├── 📁 AIDevelopmentEasy.Core/       # Core business logic
 │   │   ├── 📁 Agents/
 │   │   │   ├── 📁 Base/

@@ -1,0 +1,181 @@
+using AIDevelopmentEasy.Api.Models;
+using Microsoft.AspNetCore.SignalR;
+
+namespace AIDevelopmentEasy.Api.Hubs;
+
+/// <summary>
+/// SignalR Hub for real-time pipeline updates.
+/// Clients can subscribe to specific requirements or receive all updates.
+/// </summary>
+public class PipelineHub : Hub
+{
+    private readonly ILogger<PipelineHub> _logger;
+
+    public PipelineHub(ILogger<PipelineHub> logger)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Called when a client connects
+    /// </summary>
+    public override async Task OnConnectedAsync()
+    {
+        _logger.LogInformation("Client connected: {ConnectionId}", Context.ConnectionId);
+        await base.OnConnectedAsync();
+    }
+
+    /// <summary>
+    /// Called when a client disconnects
+    /// </summary>
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        _logger.LogInformation("Client disconnected: {ConnectionId}", Context.ConnectionId);
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>
+    /// Subscribe to updates for a specific requirement
+    /// </summary>
+    public async Task SubscribeToRequirement(string requirementId)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"requirement_{requirementId}");
+        _logger.LogInformation("Client {ConnectionId} subscribed to requirement: {RequirementId}", 
+            Context.ConnectionId, requirementId);
+    }
+
+    /// <summary>
+    /// Unsubscribe from a specific requirement
+    /// </summary>
+    public async Task UnsubscribeFromRequirement(string requirementId)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"requirement_{requirementId}");
+        _logger.LogInformation("Client {ConnectionId} unsubscribed from requirement: {RequirementId}", 
+            Context.ConnectionId, requirementId);
+    }
+
+    /// <summary>
+    /// Subscribe to all pipeline updates
+    /// </summary>
+    public async Task SubscribeToAll()
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, "all_updates");
+        _logger.LogInformation("Client {ConnectionId} subscribed to all updates", Context.ConnectionId);
+    }
+
+    /// <summary>
+    /// Unsubscribe from all updates
+    /// </summary>
+    public async Task UnsubscribeFromAll()
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, "all_updates");
+        _logger.LogInformation("Client {ConnectionId} unsubscribed from all updates", Context.ConnectionId);
+    }
+}
+
+/// <summary>
+/// Service for sending updates through the SignalR hub
+/// </summary>
+public interface IPipelineNotificationService
+{
+    Task NotifyPhaseStartedAsync(string requirementId, PipelinePhase phase, string message);
+    Task NotifyPhaseCompletedAsync(string requirementId, PipelinePhase phase, string message, object? result = null);
+    Task NotifyPhasePendingApprovalAsync(string requirementId, PipelinePhase phase, string message, object? data = null);
+    Task NotifyPhaseFailedAsync(string requirementId, PipelinePhase phase, string error);
+    Task NotifyProgressAsync(string requirementId, string message, int? progress = null);
+    Task NotifyPipelineCompletedAsync(string requirementId, string outputPath);
+    Task NotifyRequirementListChangedAsync();
+}
+
+/// <summary>
+/// Implementation of pipeline notification service using SignalR
+/// </summary>
+public class SignalRPipelineNotificationService : IPipelineNotificationService
+{
+    private readonly IHubContext<PipelineHub> _hubContext;
+    private readonly ILogger<SignalRPipelineNotificationService> _logger;
+
+    public SignalRPipelineNotificationService(
+        IHubContext<PipelineHub> hubContext,
+        ILogger<SignalRPipelineNotificationService> logger)
+    {
+        _hubContext = hubContext;
+        _logger = logger;
+    }
+
+    public async Task NotifyPhaseStartedAsync(string requirementId, PipelinePhase phase, string message)
+    {
+        var update = CreateUpdate(requirementId, "PhaseStarted", phase, message);
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Phase started: {Phase} - {Message}", requirementId, phase, message);
+    }
+
+    public async Task NotifyPhaseCompletedAsync(string requirementId, PipelinePhase phase, string message, object? result = null)
+    {
+        var update = CreateUpdate(requirementId, "PhaseCompleted", phase, message, result);
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Phase completed: {Phase} - {Message}", requirementId, phase, message);
+    }
+
+    public async Task NotifyPhasePendingApprovalAsync(string requirementId, PipelinePhase phase, string message, object? data = null)
+    {
+        var update = CreateUpdate(requirementId, "PhasePendingApproval", phase, message, data);
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Phase pending approval: {Phase} - {Message}", requirementId, phase, message);
+    }
+
+    public async Task NotifyPhaseFailedAsync(string requirementId, PipelinePhase phase, string error)
+    {
+        var update = CreateUpdate(requirementId, "PhaseFailed", phase, error);
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogError("[{RequirementId}] Phase failed: {Phase} - {Error}", requirementId, phase, error);
+    }
+
+    public async Task NotifyProgressAsync(string requirementId, string message, int? progress = null)
+    {
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "Progress",
+            Phase = PipelinePhase.None,
+            Message = message,
+            Data = progress.HasValue ? new { Progress = progress.Value } : null
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+    }
+
+    public async Task NotifyPipelineCompletedAsync(string requirementId, string outputPath)
+    {
+        var update = CreateUpdate(requirementId, "PipelineCompleted", PipelinePhase.Completed, 
+            "Pipeline completed successfully", new { OutputPath = outputPath });
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        await _hubContext.Clients.Group("all_updates").SendAsync("RequirementCompleted", requirementId);
+        _logger.LogInformation("[{RequirementId}] Pipeline completed. Output: {OutputPath}", requirementId, outputPath);
+    }
+
+    public async Task NotifyRequirementListChangedAsync()
+    {
+        await _hubContext.Clients.Group("all_updates").SendAsync("RequirementListChanged");
+    }
+
+    private PipelineUpdateMessage CreateUpdate(string requirementId, string updateType, PipelinePhase phase, string message, object? data = null)
+    {
+        return new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = updateType,
+            Phase = phase,
+            Message = message,
+            Data = data
+        };
+    }
+
+    private async Task SendToRequirementGroupAsync(string requirementId, string method, object message)
+    {
+        // Send to specific requirement subscribers
+        await _hubContext.Clients.Group($"requirement_{requirementId}").SendAsync(method, message);
+        
+        // Also send to "all updates" subscribers
+        await _hubContext.Clients.Group("all_updates").SendAsync(method, message);
+    }
+}
