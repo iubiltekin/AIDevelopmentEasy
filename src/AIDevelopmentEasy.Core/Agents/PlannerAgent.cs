@@ -137,6 +137,11 @@ When adding new code to an existing codebase:
 
 ## Output Format (JSON)
 
+### CRITICAL: Namespace Requirement
+- Every task MUST include a ""namespace"" field
+- The namespace determines where the file will be placed in the project
+- Format: ProjectName.FolderName (e.g., Picus.Common.Helpers)
+
 ### For Standalone Projects (no codebase context):
 
 {
@@ -147,7 +152,8 @@ When adding new code to an existing codebase:
             ""index"": 1,
             ""title"": ""Short descriptive title"",
             ""description"": ""Detailed description of what to implement"",
-            ""target_files"": [""ClassName.cs""]
+            ""target_files"": [""ClassName.cs""],
+            ""namespace"": ""ProjectName""
         }
     ]
 }
@@ -299,6 +305,9 @@ For each task, specify:
                         }
                     }
 
+                    // Parse namespace (CRITICAL for correct code generation)
+                    var taskNamespace = taskEl.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
+                    
                     tasks.Add(new SubTask
                     {
                         Index = taskEl.TryGetProperty("index", out var idx) ? idx.GetInt32() : tasks.Count + 1,
@@ -307,7 +316,8 @@ For each task, specify:
                         TargetFiles = targetFiles,
                         ProjectName = taskProject,
                         DependsOn = dependsOn,
-                        UsesExisting = usesExisting
+                        UsesExisting = usesExisting,
+                        Namespace = taskNamespace
                     });
                 }
             }
@@ -366,7 +376,13 @@ For each task, specify:
 2. Identify which projects need modifications
 3. Create tasks that follow existing patterns and conventions
 4. Order tasks by dependency (core implementations first, then consumers, then tests)
-5. Each task should specify the target project and files
+5. Each task MUST specify the target project, files, AND namespace
+
+## CRITICAL: Namespace Convention
+- For each task, you MUST specify the FULL namespace
+- The namespace follows the pattern: ProjectName.SubFolder (e.g., Picus.Common.Helpers)
+- Look at existing classes in the codebase to determine the correct namespace
+- The namespace determines where the file will be placed in the project
 
 Output the plan as JSON with the following structure:
 {{
@@ -379,10 +395,23 @@ Output the plan as JSON with the following structure:
             ""title"": ""Task title"",
             ""description"": ""Detailed implementation description"",
             ""target_files"": [""Folder/FileName.cs""],
+            ""namespace"": ""ProjectName.Folder"",
             ""depends_on"": [],
             ""uses_existing"": [""ExistingClass"", ""IExistingInterface""]
         }}
     ]
+}}
+
+Example for a DateTimeHelper class in Picus.Common project:
+{{
+    ""index"": 1,
+    ""project"": ""Picus.Common"",
+    ""title"": ""Create DateTimeHelper class"",
+    ""description"": ""Create DateTimeHelper class with AddDays method"",
+    ""target_files"": [""Helpers/DateTimeHelper.cs""],
+    ""namespace"": ""Picus.Common.Helpers"",
+    ""depends_on"": [],
+    ""uses_existing"": []
 }}";
     }
 
@@ -404,6 +433,10 @@ Break this down into specific development tasks. Consider:
 - What error handling is required?
 - What tests should be written?
 
+## CRITICAL: Namespace Requirement
+- For each task, you MUST specify the full namespace
+- The namespace should match the folder structure (e.g., MyProject.Helpers for Helpers/ folder)
+
 Output the plan as JSON with the following structure:
 {{
     ""project_name"": ""Short project name"",
@@ -413,7 +446,8 @@ Output the plan as JSON with the following structure:
             ""index"": 1,
             ""title"": ""Short descriptive title"",
             ""description"": ""Detailed description of what to implement"",
-            ""target_files"": [""ClassName.cs""]
+            ""target_files"": [""ClassName.cs""],
+            ""namespace"": ""ProjectName.FolderName""
         }}
     ]
 }}";
@@ -501,6 +535,9 @@ Output the plan as JSON with the following structure:
                         }
                     }
 
+                    // Parse namespace (CRITICAL for correct code generation)
+                    var taskNamespace = taskEl.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
+
                     tasks.Add(new SubTask
                     {
                         Index = taskEl.TryGetProperty("index", out var idx) ? idx.GetInt32() : tasks.Count + 1,
@@ -510,7 +547,8 @@ Output the plan as JSON with the following structure:
                         ProjectName = taskProject,
                         DependsOn = dependsOn,
                         UsesExisting = usesExisting,
-                        IsModification = modType?.ToLower() == "modify"
+                        IsModification = modType?.ToLower() == "modify",
+                        Namespace = taskNamespace
                     });
                 }
             }

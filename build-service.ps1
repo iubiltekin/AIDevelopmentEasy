@@ -17,7 +17,7 @@ Write-Host ""
 
 # Step 1: Build React UI
 if (-not $SkipReactBuild) {
-    Write-Host "[1/5] Building React UI..." -ForegroundColor Yellow
+    Write-Host "[1/6] Building React UI..." -ForegroundColor Yellow
     Push-Location "src\AIDevelopmentEasy.Web"
     
     if (-not (Test-Path "node_modules")) {
@@ -37,12 +37,12 @@ if (-not $SkipReactBuild) {
     Pop-Location
     Write-Host "[OK] React UI built successfully!" -ForegroundColor Green
 } else {
-    Write-Host "[1/5] Skipping React build (-SkipReactBuild)" -ForegroundColor Gray
+    Write-Host "[1/6] Skipping React build (-SkipReactBuild)" -ForegroundColor Gray
 }
 
 # Step 2: Build .NET API
 Write-Host ""
-Write-Host "[2/5] Building .NET API..." -ForegroundColor Yellow
+Write-Host "[2/6] Building .NET API..." -ForegroundColor Yellow
 
 $publishPath = Join-Path $OutputDir "AIDevelopmentEasy"
 
@@ -61,7 +61,7 @@ Write-Host "[OK] .NET API built successfully!" -ForegroundColor Green
 
 # Step 3: Copy React build to wwwroot
 Write-Host ""
-Write-Host "[3/5] Copying React UI to wwwroot..." -ForegroundColor Yellow
+Write-Host "[3/6] Copying React UI to wwwroot..." -ForegroundColor Yellow
 
 $reactDist = "src\AIDevelopmentEasy.Web\dist"
 $wwwroot = Join-Path $publishPath "wwwroot"
@@ -76,22 +76,31 @@ if (Test-Path $reactDist) {
     Write-Host "[WARN] React dist folder not found. Run without -SkipReactBuild" -ForegroundColor Yellow
 }
 
-# Step 4: Copy prompts directory
+# Step 4: Copy prompts to ProgramData (single source of truth)
 Write-Host ""
-Write-Host "[4/5] Copying prompts..." -ForegroundColor Yellow
+Write-Host "[4/6] Copying prompts to ProgramData..." -ForegroundColor Yellow
 $promptsSrc = "prompts"
-$promptsDst = Join-Path $publishPath "prompts"
 if (Test-Path $promptsSrc) {
-    if (Test-Path $promptsDst) {
-        Remove-Item $promptsDst -Recurse -Force
+    # Copy directly to ProgramData - this is where the app reads from
+    $programDataDir = "$env:ProgramData\AIDevelopmentEasy"
+    $programDataPrompts = "$programDataDir\prompts"
+    
+    if (-not (Test-Path $programDataDir)) {
+        New-Item -ItemType Directory -Path $programDataDir -Force | Out-Null
     }
-    Copy-Item $promptsSrc $promptsDst -Recurse -Force
-    Write-Host "[OK] Prompts copied!" -ForegroundColor Green
+    if (Test-Path $programDataPrompts) {
+        Remove-Item $programDataPrompts -Recurse -Force
+    }
+    Copy-Item $promptsSrc $programDataPrompts -Recurse -Force
+    
+    Write-Host "[OK] Prompts copied to: $programDataPrompts" -ForegroundColor Green
+} else {
+    Write-Host "[WARN] Prompts folder not found at: $promptsSrc" -ForegroundColor Yellow
 }
 
 # Step 5: Create install/uninstall scripts
 Write-Host ""
-Write-Host "[5/5] Creating service management scripts..." -ForegroundColor Yellow
+Write-Host "[5/6] Creating service management scripts..." -ForegroundColor Yellow
 
 # Install script
 @"
@@ -122,9 +131,12 @@ mkdir "%DATA_DIR%\prompts" 2>nul
 mkdir "%DATA_DIR%\codebases" 2>nul
 mkdir "%DATA_DIR%\logs" 2>nul
 
-:: Copy prompts if they exist
+:: Note: Prompts are managed via build-service.ps1 directly to ProgramData
+:: If prompts folder exists in install dir (legacy), copy it
 if exist "%~dp0prompts" (
     xcopy /s /y /i "%~dp0prompts" "%DATA_DIR%\prompts\"
+) else (
+    echo Note: Prompts should be copied via build-service.ps1
 )
 
 :: Copy appsettings if they exist
@@ -202,7 +214,9 @@ pause
 
 Write-Host "[OK] Service scripts created!" -ForegroundColor Green
 
-# Summary
+# Step 6: Summary
+Write-Host ""
+Write-Host "[6/6] Build Summary" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host "  Build Complete!" -ForegroundColor Green
@@ -213,10 +227,11 @@ Write-Host ""
 Write-Host "  Files:" -ForegroundColor White
 Write-Host "    - AIDevelopmentEasy.Api.exe  (Main executable)" -ForegroundColor Gray
 Write-Host "    - wwwroot/                   (React UI)" -ForegroundColor Gray
-Write-Host "    - prompts/                   (Agent prompts)" -ForegroundColor Gray
 Write-Host "    - appsettings.json           (Config template)" -ForegroundColor Gray
 Write-Host "    - install-service.cmd        (Install as service)" -ForegroundColor Gray
 Write-Host "    - uninstall-service.cmd      (Remove service)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Prompts: $env:ProgramData\AIDevelopmentEasy\prompts" -ForegroundColor White
 Write-Host ""
 Write-Host "  Next Steps:" -ForegroundColor Yellow
 Write-Host "    1. Copy appsettings.Local.json with your API keys" -ForegroundColor White

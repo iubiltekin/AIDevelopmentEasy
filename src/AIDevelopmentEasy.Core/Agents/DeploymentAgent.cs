@@ -238,14 +238,29 @@ public class DeploymentAgent
                 }
                 else
                 {
-                    // Ultimate fallback: use the generated path structure
-                    var pathParts = generatedPath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-                    var startIndex = pathParts.Length > 2 && !pathParts[0].Contains('.') ? 1 : 0;
-                    mapping.TargetPath = Path.Combine(codebasePath,
-                        string.Join(Path.DirectorySeparatorChar.ToString(), pathParts.Skip(startIndex)));
+                    // Path-based fallback: find project from generated path and use NamespaceFolderMap
+                    var pathBasedMapping = TryPathBasedMapping(analysis, generatedPath, fileNamespace, fileName);
 
-                    _logger?.LogWarning("[Deployment] No mapping found for namespace '{NS}', using fallback: {Target}",
-                        fileNamespace, mapping.TargetPath);
+                    if (pathBasedMapping.HasValue)
+                    {
+                        mapping.ProjectName = pathBasedMapping.Value.Project.Name;
+                        mapping.ProjectPath = pathBasedMapping.Value.Project.Path;
+                        mapping.TargetPath = Path.Combine(codebasePath, pathBasedMapping.Value.TargetFolder, fileName);
+
+                        _logger?.LogInformation("[Deployment] Mapped (path): {Generated} -> {Target} (Project: {Project}, NS: {NS})",
+                            generatedPath, mapping.TargetPath, pathBasedMapping.Value.Project.Name, fileNamespace);
+                    }
+                    else
+                    {
+                        // Ultimate fallback: use the generated path structure
+                        var pathParts = generatedPath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                        var startIndex = pathParts.Length > 2 && !pathParts[0].Contains('.') ? 1 : 0;
+                        mapping.TargetPath = Path.Combine(codebasePath,
+                            string.Join(Path.DirectorySeparatorChar.ToString(), pathParts.Skip(startIndex)));
+
+                        _logger?.LogWarning("[Deployment] No mapping found for namespace '{NS}', using fallback: {Target}",
+                            fileNamespace, mapping.TargetPath);
+                    }
                 }
             }
 
@@ -253,6 +268,82 @@ public class DeploymentAgent
         }
 
         return mappings;
+    }
+
+    /// <summary>
+    /// Try to map a file using path-based project detection and namespace folder mapping
+    /// </summary>
+    private (ProjectInfo Project, string TargetFolder)? TryPathBasedMapping(
+        CodebaseAnalysis analysis, string generatedPath, string fileNamespace, string fileName)
+    {
+        var pathParts = generatedPath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        // Find project by name in the path
+        foreach (var part in pathParts)
+        {
+            var matchedProject = analysis.Projects.FirstOrDefault(p =>
+                p.Name.Equals(part, StringComparison.OrdinalIgnoreCase));
+
+            if (matchedProject != null)
+            {
+                _logger?.LogDebug("[Deployment] Found project in path: {Part} -> {Project}", part, matchedProject.Name);
+
+                // Get project directory
+                var projectDir = !string.IsNullOrEmpty(matchedProject.ProjectDirectory)
+                    ? matchedProject.ProjectDirectory
+                    : Path.GetDirectoryName(matchedProject.RelativePath) ?? "";
+
+                // Try to find folder mapping using the namespace suffix
+                // The file might have short namespace like "Helpers" instead of "Picus.Common.Helpers"
+                // Check if the namespace matches any suffix in NamespaceFolderMap
+                if (matchedProject.NamespaceFolderMap.TryGetValue(fileNamespace, out var folderPath))
+                {
+                    var targetFolder = string.IsNullOrEmpty(folderPath)
+                        ? projectDir
+                        : Path.Combine(projectDir, folderPath.Replace('/', Path.DirectorySeparatorChar));
+
+                    _logger?.LogDebug("[Deployment] Found folder mapping: NS={NS} -> Folder={Folder}",
+                        fileNamespace, folderPath);
+
+                    return (matchedProject, targetFolder);
+                }
+
+                // Also try without common prefixes like "UnitTests.", "Tests."
+                var strippedNs = fileNamespace
+                    .Replace("UnitTests.", "")
+                    .Replace("UnitTest.", "")
+                    .Replace("Tests.", "")
+                    .Replace("Test.", "");
+
+                if (strippedNs != fileNamespace && matchedProject.NamespaceFolderMap.TryGetValue(strippedNs, out var strippedFolder))
+                {
+                    var targetFolder = string.IsNullOrEmpty(strippedFolder)
+                        ? projectDir
+                        : Path.Combine(projectDir, strippedFolder.Replace('/', Path.DirectorySeparatorChar));
+
+                    _logger?.LogDebug("[Deployment] Found folder mapping (stripped): NS={NS} -> Folder={Folder}",
+                        strippedNs, strippedFolder);
+
+                    return (matchedProject, targetFolder);
+                }
+
+                // Fallback: use namespace as folder path if it looks like a subfolder
+                if (!fileNamespace.Contains('.') && !string.IsNullOrEmpty(fileNamespace))
+                {
+                    // Simple namespace like "Helpers" - use it as folder name
+                    var targetFolder = Path.Combine(projectDir, fileNamespace);
+
+                    _logger?.LogDebug("[Deployment] Using namespace as folder: {NS}", fileNamespace);
+
+                    return (matchedProject, targetFolder);
+                }
+
+                // Last resort: just use project directory
+                return (matchedProject, projectDir);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -502,17 +593,24 @@ public class DeploymentAgent
         // Build each project
         foreach (var projectPath in projectsToBuild)
         {
-            _logger?.LogInformation("[Deployment] Building project: {Project}",
-                Path.GetFileName(projectPath));
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+            
+            // Use "Test" configuration for unit test projects, "Debug" for others
+            var isTestProject = projectName.Contains("Test", StringComparison.OrdinalIgnoreCase) ||
+                               projectName.Contains("UnitTest", StringComparison.OrdinalIgnoreCase);
+            var configuration = isTestProject ? "Test" : "Debug";
+            
+            _logger?.LogInformation("[Deployment] Building project: {Project} (Configuration: {Config})",
+                projectName, configuration);
 
-            var buildResult = await BuildWithMSBuildAsync(msbuildPath, projectPath, cancellationToken);
+            var buildResult = await BuildWithMSBuildAsync(msbuildPath, projectPath, configuration, cancellationToken);
             results.Add(buildResult);
 
             // If build fails, log but continue with other projects
             if (!buildResult.Success)
             {
                 _logger?.LogWarning("[Deployment] Build failed for {Project}: {Error}",
-                    Path.GetFileName(projectPath), buildResult.Error);
+                    projectName, buildResult.Error);
             }
         }
 
@@ -522,6 +620,7 @@ public class DeploymentAgent
     private async Task<BuildResult> BuildWithMSBuildAsync(
         string msbuildPath,
         string targetPath,
+        string configuration,
         CancellationToken cancellationToken)
     {
         var result = new BuildResult
@@ -534,7 +633,7 @@ public class DeploymentAgent
             var psi = new ProcessStartInfo
             {
                 FileName = msbuildPath,
-                Arguments = $"\"{targetPath}\" /t:Build /p:Configuration=Debug /nologo /v:minimal /m",
+                Arguments = $"\"{targetPath}\" /t:Build /p:Configuration={configuration} /nologo /v:minimal /m",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -650,6 +749,124 @@ public class DeploymentAgent
 
         return null;
     }
+
+    /// <summary>
+    /// Rollback a deployment - delete created files and revert csproj changes
+    /// </summary>
+    public async Task<RollbackResult> RollbackAsync(DeploymentResult deployment, CancellationToken cancellationToken = default)
+    {
+        _logger?.LogInformation("[Deployment] Starting rollback for deployment at: {Path}", deployment.CodebasePath);
+
+        var result = new RollbackResult
+        {
+            DeploymentPath = deployment.CodebasePath,
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            // Delete newly created files (not modified ones)
+            foreach (var file in deployment.CopiedFiles.Where(f => f.Success && f.IsNewFile))
+            {
+                try
+                {
+                    if (File.Exists(file.TargetPath))
+                    {
+                        File.Delete(file.TargetPath);
+                        result.DeletedFiles.Add(file.TargetPath);
+                        _logger?.LogInformation("[Rollback] Deleted file: {Path}", file.TargetPath);
+
+                        // Try to remove empty parent directories
+                        var dir = Path.GetDirectoryName(file.TargetPath);
+                        while (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                        {
+                            if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                            {
+                                Directory.Delete(dir);
+                                result.DeletedDirectories.Add(dir);
+                                _logger?.LogInformation("[Rollback] Deleted empty directory: {Dir}", dir);
+                                dir = Path.GetDirectoryName(dir);
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"Failed to delete {file.TargetPath}: {ex.Message}");
+                    _logger?.LogWarning(ex, "[Rollback] Failed to delete file: {Path}", file.TargetPath);
+                }
+            }
+
+            // Revert csproj changes (remove added compile items)
+            foreach (var update in deployment.UpdatedProjects.Where(u => u.Success && u.AddedFiles.Any()))
+            {
+                try
+                {
+                    await RevertCsprojChangesAsync(update.ProjectPath, update.AddedFiles, cancellationToken);
+                    result.RevertedProjects.Add(update.ProjectPath);
+                    _logger?.LogInformation("[Rollback] Reverted csproj: {Path}", update.ProjectPath);
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"Failed to revert {update.ProjectPath}: {ex.Message}");
+                    _logger?.LogWarning(ex, "[Rollback] Failed to revert csproj: {Path}", update.ProjectPath);
+                }
+            }
+
+            result.Success = result.Errors.Count == 0;
+            result.CompletedAt = DateTime.UtcNow;
+
+            _logger?.LogInformation("[Rollback] Rollback completed. Deleted {Files} files, {Dirs} directories, reverted {Projects} projects",
+                result.DeletedFiles.Count, result.DeletedDirectories.Count, result.RevertedProjects.Count);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[Rollback] Rollback failed: {Message}", ex.Message);
+            result.Success = false;
+            result.Errors.Add(ex.Message);
+            result.CompletedAt = DateTime.UtcNow;
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Remove compile items from a csproj file
+    /// </summary>
+    private async Task RevertCsprojChangesAsync(string csprojPath, List<string> filesToRemove, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(csprojPath) || filesToRemove.Count == 0)
+            return;
+
+        var csprojContent = await File.ReadAllTextAsync(csprojPath, cancellationToken);
+        var doc = XDocument.Parse(csprojContent);
+        var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+
+        bool modified = false;
+        foreach (var fileToRemove in filesToRemove)
+        {
+            var compileElements = doc.Descendants(ns + "Compile")
+                .Where(e => e.Attribute("Include")?.Value.Equals(fileToRemove, StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            foreach (var element in compileElements)
+            {
+                element.Remove();
+                modified = true;
+                _logger?.LogDebug("[Rollback] Removed compile item: {File} from {Project}", fileToRemove, Path.GetFileName(csprojPath));
+            }
+        }
+
+        if (modified)
+        {
+            await File.WriteAllTextAsync(csprojPath, doc.ToString(), cancellationToken);
+        }
+    }
 }
 
 #region Result Models
@@ -668,6 +885,18 @@ public class DeploymentResult
     public int TotalFilesCopied => CopiedFiles.Count(f => f.Success);
     public int NewFilesCreated => CopiedFiles.Count(f => f.Success && f.IsNewFile);
     public int FilesModified => CopiedFiles.Count(f => f.Success && !f.IsNewFile);
+}
+
+public class RollbackResult
+{
+    public bool Success { get; set; }
+    public string DeploymentPath { get; set; } = "";
+    public DateTime StartedAt { get; set; }
+    public DateTime CompletedAt { get; set; }
+    public List<string> DeletedFiles { get; set; } = new();
+    public List<string> DeletedDirectories { get; set; } = new();
+    public List<string> RevertedProjects { get; set; } = new();
+    public List<string> Errors { get; set; } = new();
 }
 
 public class FileMapping

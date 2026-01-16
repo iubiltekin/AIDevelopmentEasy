@@ -140,9 +140,8 @@ public class RequirementsController : ControllerBase
         if (!exists)
             return NotFound();
 
-        await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
-        await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
-        await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
+        // Reset all status flags including failed status
+        await _requirementRepository.UpdateStatusAsync(id, RequirementStatus.NotStarted, cancellationToken);
 
         if (clearTasks)
         {

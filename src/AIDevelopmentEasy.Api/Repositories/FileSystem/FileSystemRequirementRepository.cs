@@ -179,12 +179,40 @@ public class FileSystemRequirementRepository : IRequirementRepository
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 await _approvalRepository.MarkCompletedAsync(id, cancellationToken);
                 break;
+            case RequirementStatus.Failed:
+                // Reset in-progress flag so it shows as failed, not running
+                await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
+                // Save failed status to metadata file
+                await SaveFailedStatusAsync(id, cancellationToken);
+                break;
             case RequirementStatus.NotStarted:
                 await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
                 await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
+                // Clear failed status if exists
+                await ClearFailedStatusAsync(id, cancellationToken);
                 break;
         }
+    }
+
+    private async Task SaveFailedStatusAsync(string id, CancellationToken cancellationToken)
+    {
+        var folderPath = Path.Combine(_requirementsPath, id);
+        if (!Directory.Exists(folderPath))
+            Directory.CreateDirectory(folderPath);
+
+        var failedFile = Path.Combine(folderPath, ".failed");
+        await File.WriteAllTextAsync(failedFile, DateTime.UtcNow.ToString("O"), cancellationToken);
+    }
+
+    private Task ClearFailedStatusAsync(string id, CancellationToken cancellationToken)
+    {
+        var failedFile = Path.Combine(_requirementsPath, id, ".failed");
+        if (File.Exists(failedFile))
+        {
+            File.Delete(failedFile);
+        }
+        return Task.CompletedTask;
     }
 
     public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
@@ -236,8 +264,14 @@ public class FileSystemRequirementRepository : IRequirementRepository
             var status = await _approvalRepository.GetStatusAsync(id, cancellationToken);
             var hasTasks = await _taskRepository.HasTasksAsync(id, cancellationToken);
 
+            // Check if failed (overrides other statuses)
+            var failedFile = Path.Combine(_requirementsPath, id, ".failed");
+            if (File.Exists(failedFile))
+            {
+                status = RequirementStatus.Failed;
+            }
             // Adjust status based on tasks
-            if (status == RequirementStatus.NotStarted && hasTasks)
+            else if (status == RequirementStatus.NotStarted && hasTasks)
             {
                 status = RequirementStatus.Planned;
             }

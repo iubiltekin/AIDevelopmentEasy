@@ -197,16 +197,44 @@ IMPORTANT: Output ONLY code in a single code block. No explanations before or af
                 planContext = $"\n\nPROJECT CONTEXT:\n{summary}\n";
             }
 
+            // Get target namespace - CRITICAL for correct code generation
+            var namespaceSection = "";
+            if (request.Context.TryGetValue("target_namespace", out var targetNs) && !string.IsNullOrEmpty(targetNs))
+            {
+                namespaceSection = $@"
+
+TARGET NAMESPACE (REQUIRED):
+You MUST use this exact namespace: {targetNs}
+
+The generated code MUST start with:
+namespace {targetNs}
+{{
+    // Your implementation here
+}}
+
+DO NOT use any other namespace. DO NOT shorten or modify this namespace.
+";
+                _logger?.LogInformation("[Coder] Using target namespace: {Namespace}", targetNs);
+            }
+
+            // Get project name for additional context
+            var projectContext = "";
+            if (request.Context.TryGetValue("project_name", out var projectName) && !string.IsNullOrEmpty(projectName))
+            {
+                projectContext = $"\nTARGET PROJECT: {projectName}\n";
+            }
+
             var userPrompt = $@"Please implement the following task:
 
 TASK:
 {request.Input}
-{planContext}{contextSection}
+{projectContext}{namespaceSection}{planContext}{contextSection}
 Generate the complete code for this task. Make sure to:
-1. Include all necessary imports
-2. Handle potential errors
-3. Add helpful comments
-4. Follow best practices
+1. Include all necessary imports/using statements
+2. Use the EXACT namespace specified above (if provided)
+3. Handle potential errors
+4. Add helpful comments
+5. Follow best practices
 
 Output the code in a markdown code block.";
 

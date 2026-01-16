@@ -590,6 +590,9 @@ public class PipelineService : IPipelineService
             var deployCodebaseId = requirement.CodebaseId;
             if (!string.IsNullOrEmpty(deployCodebaseId))
             {
+                // Store deployment result for potential rollback
+                DeploymentResult? lastDeploymentResult = null;
+
                 var deployResult = await ExecutePhaseAsync(execution, PipelinePhase.Deployment, async () =>
                 {
                     await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Deployment, 
@@ -625,6 +628,9 @@ public class PipelineService : IPipelineService
 
                     // Deploy files to codebase using full analysis for accurate project paths
                     var deploymentResult = await _deploymentAgent.DeployAsync(codebaseAnalysis, files, ct);
+                    
+                    // Store for potential rollback
+                    lastDeploymentResult = deploymentResult;
 
                     if (deploymentResult.Success)
                     {
@@ -653,7 +659,35 @@ public class PipelineService : IPipelineService
                     };
                 }, ct);
 
-                if (!deployResult.Approved) return;
+                // If deployment was rejected, rollback the changes
+                if (!deployResult.Approved)
+                {
+                    if (lastDeploymentResult != null && lastDeploymentResult.TotalFilesCopied > 0)
+                    {
+                        _logger.LogInformation("[{RequirementId}] Deployment rejected, starting rollback...", requirementId);
+                        await _notificationService.NotifyProgressAsync(requirementId, "Rolling back deployment changes...");
+                        
+                        var rollbackResult = await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
+                        
+                        if (rollbackResult.Success)
+                        {
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"Rollback complete: {rollbackResult.DeletedFiles.Count} files deleted, {rollbackResult.RevertedProjects.Count} projects reverted");
+                        }
+                        else
+                        {
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"Rollback had errors: {string.Join(", ", rollbackResult.Errors)}");
+                        }
+                    }
+                    
+                    // Mark requirement as failed
+                    await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+                    await _notificationService.NotifyPhaseFailedAsync(requirementId, PipelinePhase.Deployment, 
+                        execution.RejectionReason ?? "Deployment rejected by user");
+                    
+                    return;
+                }
             }
 
             // Mark as completed (this also clears InProgress)
@@ -1040,19 +1074,27 @@ public class PipelineService : IPipelineService
 
             _logger.LogInformation("[Coding] Executing modification for: {FilePath}", task.FullPath);
 
+            var context = new Dictionary<string, string>
+            {
+                ["is_modification"] = "true",
+                ["current_content"] = currentContent,
+                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? Path.GetFileName(task.FullPath),
+                ["full_path"] = task.FullPath,
+                ["task_index"] = task.Index.ToString(),
+                ["project_name"] = task.ProjectName ?? "default"
+            };
+
+            // Add namespace if available
+            if (!string.IsNullOrEmpty(task.Namespace))
+            {
+                context["target_namespace"] = task.Namespace;
+            }
+
             var request = new AgentRequest
             {
                 Input = task.Description,
                 ProjectState = projectState,
-                Context = new Dictionary<string, string>
-                {
-                    ["is_modification"] = "true",
-                    ["current_content"] = currentContent,
-                    ["target_file"] = task.TargetFiles.FirstOrDefault() ?? Path.GetFileName(task.FullPath),
-                    ["full_path"] = task.FullPath,
-                    ["task_index"] = task.Index.ToString(),
-                    ["project_name"] = task.ProjectName ?? "default"
-                }
+                Context = context
             };
 
             return await _coderAgent.RunAsync(request, ct);
@@ -1071,16 +1113,25 @@ public class PipelineService : IPipelineService
         ProjectState projectState,
         CancellationToken ct)
     {
+        var context = new Dictionary<string, string>
+        {
+            ["task_index"] = task.Index.ToString(),
+            ["target_file"] = task.TargetFiles.FirstOrDefault() ?? "",
+            ["project_name"] = task.ProjectName ?? "default"
+        };
+
+        // Add namespace if available (CRITICAL for correct code generation)
+        if (!string.IsNullOrEmpty(task.Namespace))
+        {
+            context["target_namespace"] = task.Namespace;
+            _logger.LogDebug("[Coding] Using namespace: {Namespace} for task {Index}", task.Namespace, task.Index);
+        }
+
         var request = new AgentRequest
         {
             Input = task.Description,
             ProjectState = projectState,
-            Context = new Dictionary<string, string>
-            {
-                ["task_index"] = task.Index.ToString(),
-                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? "",
-                ["project_name"] = task.ProjectName ?? "default"
-            }
+            Context = context
         };
 
         return await _coderAgent.RunAsync(request, ct);
