@@ -112,15 +112,21 @@ public class FileSystemRequirementRepository : IRequirementRepository
         // Status is managed through approval repository, this is for future database implementations
         switch (status)
         {
+            case RequirementStatus.InProgress:
+                await _approvalRepository.MarkInProgressAsync(id, cancellationToken);
+                break;
             case RequirementStatus.Approved:
+                await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 await _approvalRepository.ApprovePlanAsync(id, cancellationToken);
                 break;
             case RequirementStatus.Completed:
+                await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 await _approvalRepository.MarkCompletedAsync(id, cancellationToken);
                 break;
             case RequirementStatus.NotStarted:
                 await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
                 await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
+                await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 break;
         }
     }

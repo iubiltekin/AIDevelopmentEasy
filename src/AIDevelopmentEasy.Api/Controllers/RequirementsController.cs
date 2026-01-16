@@ -141,6 +141,7 @@ public class RequirementsController : ControllerBase
 
         await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
         await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
+        await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
 
         if (clearTasks)
         {

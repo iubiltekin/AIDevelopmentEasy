@@ -29,6 +29,21 @@ public interface IApprovalRepository
     Task MarkCompletedAsync(string requirementId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Check if a requirement is in progress
+    /// </summary>
+    Task<bool> IsInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mark a requirement as in progress
+    /// </summary>
+    Task MarkInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reset in progress state
+    /// </summary>
+    Task ResetInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Reset approval state (to reprocess)
     /// </summary>
     Task ResetApprovalAsync(string requirementId, CancellationToken cancellationToken = default);

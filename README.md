@@ -28,6 +28,9 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 | **.NET 8** | AIDevelopmentEasy runtime |
 | **Azure OpenAI (GPT-4o)** | LLM API - code generation and analysis |
 | **ASP.NET Core Web API** | REST API with SignalR real-time updates |
+| **React + TypeScript** | Modern web UI with real-time updates |
+| **TailwindCSS** | Utility-first CSS framework |
+| **SignalR** | WebSocket-based real-time communication |
 | **MSBuild** | Compilation of generated C# code |
 | **Microsoft.Extensions.DependencyInjection** | SOLID-compliant DI container |
 | **Serilog** | Structured logging |
@@ -37,7 +40,70 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 | Mode | Command | Description |
 |------|---------|-------------|
 | **CLI (Interactive)** | `dotnet run --project src/AIDevelopmentEasy.CLI` | Terminal-based interactive workflow |
-| **Web API** | `dotnet run --project src/AIDevelopmentEasy.Api` | REST API + SignalR for web clients |
+| **Web API + UI** | `dotnet run --project src/AIDevelopmentEasy.Api` | REST API + React UI + SignalR |
+| **Windows Service** | `install-service.cmd` | Background service with web UI |
+| **Dev (separate)** | API + `npm run dev` | Development with hot reload |
+
+### 🌐 Web UI Quick Start
+
+```bash
+# Option 1: All-in-one (API serves React UI)
+dotnet run --project src/AIDevelopmentEasy.Api --urls "http://localhost:5000"
+# Open http://localhost:5000
+
+# Option 2: Development mode (hot reload)
+# Terminal 1: API
+dotnet run --project src/AIDevelopmentEasy.Api --urls "http://localhost:5000"
+# Terminal 2: React (with hot reload)
+cd src/AIDevelopmentEasy.Web && npm run dev
+# Open http://localhost:3000
+```
+
+#### Web UI Features
+- 📋 **Dashboard** - View all requirements with status indicators
+- ➕ **Create Requirements** - Add new single or multi-project requirements
+- 🔄 **Real-time Updates** - Live pipeline progress via SignalR
+- ✅ **Approve/Reject** - Interactive phase approval workflow
+- 📊 **Task Viewer** - See generated tasks and their status
+- 📁 **Output Viewer** - Browse generated code files
+
+### 🖥️ Windows Service Installation
+
+Build and install as a Windows Service for always-on background processing:
+
+```powershell
+# 1. Build the service package
+.\build-service.ps1
+
+# 2. Copy your API keys
+copy src\AIDevelopmentEasy.Api\appsettings.Local.json publish\AIDevelopmentEasy\
+
+# 3. Install (Run as Administrator)
+cd publish\AIDevelopmentEasy
+.\install-service.cmd
+
+# 4. Start the service
+net start AIDevelopmentEasy
+
+# 5. Open browser
+# http://localhost:5000
+```
+
+#### Service Commands
+```cmd
+net start AIDevelopmentEasy    # Start
+net stop AIDevelopmentEasy     # Stop
+sc query AIDevelopmentEasy     # Status
+.\uninstall-service.cmd        # Uninstall
+```
+
+#### Service Data Locations
+| Path | Content |
+|------|---------|
+| `%ProgramData%\AIDevelopmentEasy\requirements` | Requirement files |
+| `%ProgramData%\AIDevelopmentEasy\output` | Generated code |
+| `%ProgramData%\AIDevelopmentEasy\prompts` | Agent prompts |
+| `%ProgramData%\AIDevelopmentEasy\logs` | Service logs |
 
 ### Web API Endpoints
 
@@ -290,6 +356,16 @@ AIDevelopmentEasy/
 ├── 📄 LICENSE
 │
 ├── 📁 src/
+│   ├── 📁 AIDevelopmentEasy.Web/        # React Web UI
+│   │   ├── src/
+│   │   │   ├── components/              # Reusable UI components
+│   │   │   ├── pages/                   # Page components
+│   │   │   ├── hooks/                   # Custom React hooks (SignalR)
+│   │   │   ├── services/                # API client
+│   │   │   └── types/                   # TypeScript definitions
+│   │   ├── package.json                 # Node dependencies
+│   │   └── vite.config.ts               # Vite configuration
+│   │
 │   ├── 📁 AIDevelopmentEasy.Api/        # Web API (REST + SignalR)
 │   │   ├── Controllers/                 # API endpoints
 │   │   ├── Hubs/                        # SignalR hubs
@@ -368,12 +444,14 @@ AIDevelopmentEasy/
 
 ## Future Improvements
 
+- [x] ~~Web UI (Blazor/React)~~ ✅ React UI implemented!
+- [x] ~~Windows Service~~ ✅ Background processing with web UI!
 - [ ] Jira integration (fetch requirements from Jira)
+- [ ] Database storage (PostgreSQL/SQLite)
 - [ ] Parallel agent execution
 - [ ] Vector database for memory
 - [ ] Git integration (auto-commit)
 - [ ] Existing codebase analysis
-- [ ] Web UI (Blazor/React)
 
 ## References
 

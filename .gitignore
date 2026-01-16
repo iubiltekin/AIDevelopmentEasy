@@ -20,3 +20,13 @@ requirements/*/_approved.json
 requirements/*/_completed.json
 requirements/*/_status.json
 requirements/*/projects/
+
+# React/Node.js (Web UI)
+node_modules/
+dist/
+*.local
+.env*.local
+npm-debug.log*
+
+# Published/Build output
+/publish/

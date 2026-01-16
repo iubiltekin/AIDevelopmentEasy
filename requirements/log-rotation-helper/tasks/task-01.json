@@ -1,0 +1,8 @@
+﻿{
+  "index": 1,
+  "title": "Create ILogRotator interface",
+  "description": "Define the contract for log rotation operations",
+  "projectName": "LogRotationHelper",
+  "targetFiles": ["ILogRotator.cs"],
+  "status": 2
+}

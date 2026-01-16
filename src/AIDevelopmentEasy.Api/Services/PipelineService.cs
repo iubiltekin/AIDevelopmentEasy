@@ -181,6 +181,10 @@ public class PipelineService : IPipelineService
             execution.Status.IsRunning = true;
             execution.Status.StartedAt = DateTime.UtcNow;
 
+            // Update requirement status to InProgress
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.InProgress, ct);
+            await _notificationService.NotifyRequirementListChangedAsync();
+
             // Get requirement content
             var content = await _requirementRepository.GetContentAsync(requirementId, ct);
             if (string.IsNullOrEmpty(content))
@@ -328,8 +332,8 @@ public class PipelineService : IPipelineService
 
             if (!reviewResult.Approved) return;
 
-            // Mark as completed
-            await _approvalRepository.MarkCompletedAsync(requirementId, ct);
+            // Mark as completed (this also clears InProgress)
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Completed, ct);
 
             var outputPath = await _outputRepository.GetOutputPathAsync(requirementId, ct);
             await _notificationService.NotifyPipelineCompletedAsync(requirementId, outputPath ?? "");
@@ -340,16 +344,19 @@ public class PipelineService : IPipelineService
         catch (OperationCanceledException)
         {
             _logger.LogInformation("[{RequirementId}] Pipeline cancelled", requirementId);
+            await _approvalRepository.ResetInProgressAsync(requirementId, CancellationToken.None);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{RequirementId}] Pipeline failed", requirementId);
             await _notificationService.NotifyPhaseFailedAsync(requirementId, execution.CurrentPhase, ex.Message);
+            await _approvalRepository.ResetInProgressAsync(requirementId, CancellationToken.None);
         }
         finally
         {
             execution.Status.IsRunning = false;
             _runningPipelines.TryRemove(requirementId, out _);
+            await _notificationService.NotifyRequirementListChangedAsync();
         }
     }
 

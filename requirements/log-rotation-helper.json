@@ -9,16 +9,8 @@
       "order": 1,
       "depends_on": [],
       "outputs": [
-        {
-          "file": "LogRotator.cs",
-          "type": "implementation",
-          "uses": []
-        },
-        {
-          "file": "ILogRotator.cs",
-          "type": "implementation",
-          "uses": []
-        }
+        { "file": "LogRotator.cs", "type": "implementation", "uses": [] },
+        { "file": "ILogRotator.cs", "type": "implementation", "uses": [] }
       ],
       "test_project": "LogRotationHelper.Tests"
     },
@@ -29,18 +21,8 @@
       "order": 2,
       "depends_on": ["LogRotationHelper"],
       "outputs": [
-        {
-          "file": "LogRotatorTests.cs",
-          "type": "test",
-          "uses": ["LogRotator", "ILogRotator"]
-        }
+        { "file": "LogRotatorTests.cs", "type": "test", "uses": ["LogRotator", "ILogRotator"] }
       ]
     }
-  ],
-  "integration": {
-    "order": 99,
-    "description": "Build solution and run all tests",
-    "build_all": true,
-    "run_tests": true
-  }
+  ]
 }

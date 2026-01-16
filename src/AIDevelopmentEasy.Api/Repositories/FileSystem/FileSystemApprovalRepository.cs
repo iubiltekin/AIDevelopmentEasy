@@ -16,6 +16,7 @@ public class FileSystemApprovalRepository : IApprovalRepository
 
     private const string ApprovedFileName = "_approved.json";
     private const string CompletedFileName = "_completed.json";
+    private const string InProgressFileName = "_inprogress.json";
 
     public FileSystemApprovalRepository(string requirementsPath, ILogger<FileSystemApprovalRepository> logger)
     {
@@ -102,11 +103,52 @@ public class FileSystemApprovalRepository : IApprovalRepository
         return Task.CompletedTask;
     }
 
+    public Task<bool> IsInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    {
+        var filePath = GetInProgressFilePath(requirementId);
+        return Task.FromResult(File.Exists(filePath));
+    }
+
+    public async Task MarkInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    {
+        var folderPath = GetRequirementFolder(requirementId);
+        Directory.CreateDirectory(folderPath);
+
+        var filePath = GetInProgressFilePath(requirementId);
+        var data = new
+        {
+            StartedAt = DateTime.UtcNow,
+            RequirementId = requirementId
+        };
+
+        var json = JsonSerializer.Serialize(data, _jsonOptions);
+        await File.WriteAllTextAsync(filePath, json, cancellationToken);
+
+        _logger.LogInformation("Requirement marked as in progress: {RequirementId}", requirementId);
+    }
+
+    public Task ResetInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    {
+        var filePath = GetInProgressFilePath(requirementId);
+        
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+            _logger.LogInformation("In progress reset for requirement: {RequirementId}", requirementId);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<RequirementStatus> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default)
     {
         var isCompleted = await IsCompletedAsync(requirementId, cancellationToken);
         if (isCompleted)
             return RequirementStatus.Completed;
+
+        var isInProgress = await IsInProgressAsync(requirementId, cancellationToken);
+        if (isInProgress)
+            return RequirementStatus.InProgress;
 
         var isApproved = await IsPlanApprovedAsync(requirementId, cancellationToken);
         if (isApproved)
@@ -129,5 +171,10 @@ public class FileSystemApprovalRepository : IApprovalRepository
     private string GetCompletedFilePath(string requirementId)
     {
         return Path.Combine(GetRequirementFolder(requirementId), CompletedFileName);
+    }
+
+    private string GetInProgressFilePath(string requirementId)
+    {
+        return Path.Combine(GetRequirementFolder(requirementId), InProgressFileName);
     }
 }

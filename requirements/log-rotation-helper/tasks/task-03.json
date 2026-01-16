@@ -1,0 +1,8 @@
+﻿{
+  "index": 3,
+  "title": "Create LogRotator unit tests",
+  "description": "Comprehensive tests for all LogRotator functionality",
+  "projectName": "LogRotationHelper.Tests",
+  "targetFiles": ["LogRotatorTests.cs"],
+  "status": 2
+}

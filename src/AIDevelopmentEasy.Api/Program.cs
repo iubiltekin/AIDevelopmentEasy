@@ -7,9 +7,32 @@ using AIDevelopmentEasy.Api.Services;
 using AIDevelopmentEasy.Api.Services.Interfaces;
 using AIDevelopmentEasy.Core.Agents;
 using AIDevelopmentEasy.Core.Services;
+using Microsoft.Extensions.FileProviders;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ════════════════════════════════════════════════════════════════════════════
+// Windows Service Support
+// ════════════════════════════════════════════════════════════════════════════
+builder.Host.UseWindowsService(options =>
+{
+    options.ServiceName = "AIDevelopmentEasy";
+});
+
+// When running as a service, use the executable's directory as content root
+if (WindowsServiceHelpers.IsWindowsService())
+{
+    var exePath = Environment.ProcessPath;
+    if (!string.IsNullOrEmpty(exePath))
+    {
+        var exeDir = Path.GetDirectoryName(exePath);
+        if (!string.IsNullOrEmpty(exeDir))
+        {
+            builder.Host.UseContentRoot(exeDir);
+        }
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // Configuration
@@ -22,10 +45,17 @@ builder.Configuration
 // ════════════════════════════════════════════════════════════════════════════
 // Serilog
 // ════════════════════════════════════════════════════════════════════════════
+var logPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "AIDevelopmentEasy", "logs", "aideveasy-.log");
+
+Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .MinimumLevel.Information()
     .WriteTo.Console()
+    .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -68,7 +98,7 @@ builder.Services.AddControllers();
 // SignalR
 builder.Services.AddSignalR();
 
-// CORS (for React frontend)
+// CORS (for development with separate React dev server)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp", policy =>
@@ -130,15 +160,21 @@ var app = builder.Build();
 // Middleware Pipeline
 // ════════════════════════════════════════════════════════════════════════════
 
-// Swagger
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "AIDevelopmentEasy API v1"));
-}
+// Swagger (always available, useful for debugging)
+app.UseSwagger();
+app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "AIDevelopmentEasy API v1"));
 
-// CORS
+// CORS (for development)
 app.UseCors("AllowReactApp");
+
+// Serve React static files from wwwroot
+var wwwrootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+if (Directory.Exists(wwwrootPath))
+{
+    app.UseDefaultFiles(); // Serves index.html by default
+    app.UseStaticFiles();  // Serves static files from wwwroot
+    Log.Information("Serving React UI from: {Path}", wwwrootPath);
+}
 
 // Routing
 app.UseRouting();
@@ -150,10 +186,21 @@ app.MapHub<PipelineHub>("/hubs/pipeline");
 // Health check
 app.MapGet("/health", () => new { Status = "Healthy", Timestamp = DateTime.UtcNow });
 
-Log.Information("AIDevelopmentEasy API started");
-Log.Information("Requirements path: {Path}", requirementsPath);
-Log.Information("Output path: {Path}", outputPath);
-Log.Information("Swagger UI: http://localhost:5000/swagger");
+// SPA fallback - serve index.html for any unknown routes (for React Router)
+if (Directory.Exists(wwwrootPath))
+{
+    app.MapFallbackToFile("index.html");
+}
+
+Log.Information("════════════════════════════════════════════════════════════");
+Log.Information("  AIDevelopmentEasy Service Started");
+Log.Information("════════════════════════════════════════════════════════════");
+Log.Information("  Mode: {Mode}", WindowsServiceHelpers.IsWindowsService() ? "Windows Service" : "Console");
+Log.Information("  Requirements: {Path}", requirementsPath);
+Log.Information("  Output: {Path}", outputPath);
+Log.Information("  API: /swagger");
+Log.Information("  Web UI: / (if wwwroot exists)");
+Log.Information("════════════════════════════════════════════════════════════");
 
 app.Run();
 
@@ -162,6 +209,17 @@ app.Run();
 // ════════════════════════════════════════════════════════════════════════════
 static string FindSolutionDirectory()
 {
+    // When running as Windows Service, use a fixed data directory
+    if (WindowsServiceHelpers.IsWindowsService())
+    {
+        var dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "AIDevelopmentEasy");
+        Directory.CreateDirectory(dataDir);
+        return dataDir;
+    }
+    
+    // When running in dev mode, find solution directory
     var dir = new DirectoryInfo(AppContext.BaseDirectory);
     while (dir != null)
     {
@@ -170,4 +228,27 @@ static string FindSolutionDirectory()
         dir = dir.Parent;
     }
     return AppContext.BaseDirectory;
+}
+
+/// <summary>
+/// Helper class for Windows Service detection
+/// </summary>
+public static class WindowsServiceHelpers
+{
+    public static bool IsWindowsService()
+    {
+        if (!OperatingSystem.IsWindows())
+            return false;
+            
+        // Check if parent process is services.exe
+        try
+        {
+            using var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+            return currentProcess.SessionId == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
