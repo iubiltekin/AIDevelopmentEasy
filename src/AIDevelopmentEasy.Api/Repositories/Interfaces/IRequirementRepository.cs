@@ -26,7 +26,7 @@ public interface IRequirementRepository
     /// <summary>
     /// Create a new requirement
     /// </summary>
-    Task<RequirementDto> CreateAsync(string name, string content, RequirementType type, CancellationToken cancellationToken = default);
+    Task<RequirementDto> CreateAsync(string name, string content, RequirementType type, string? codebaseId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update requirement status

@@ -119,6 +119,7 @@ set DATA_DIR=%ProgramData%\AIDevelopmentEasy
 mkdir "%DATA_DIR%\requirements" 2>nul
 mkdir "%DATA_DIR%\output" 2>nul
 mkdir "%DATA_DIR%\prompts" 2>nul
+mkdir "%DATA_DIR%\codebases" 2>nul
 mkdir "%DATA_DIR%\logs" 2>nul
 
 :: Copy prompts if they exist

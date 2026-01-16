@@ -30,7 +30,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .WriteTo.File(
-        Path.Combine(tempPaths.LogsPath, "aideveasy-.txt"),
+        Path.Combine(tempPaths.LogsPath, "cli-.log"),
         rollingInterval: RollingInterval.Day,
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}",
         retainedFileCountLimit: 7)

@@ -77,9 +77,10 @@ public class FileSystemRequirementRepository : IRequirementRepository
         return await File.ReadAllTextAsync(filePath, cancellationToken);
     }
 
-    public async Task<RequirementDto> CreateAsync(string name, string content, RequirementType type, CancellationToken cancellationToken = default)
+    public async Task<RequirementDto> CreateAsync(string name, string content, RequirementType type, string? codebaseId = null, CancellationToken cancellationToken = default)
     {
-        var extension = type == RequirementType.Multi ? ".json" : ".md";
+        // All requirements are now single-project type (stored as .md)
+        var extension = ".md";
         var fileName = SanitizeFileName(name) + extension;
         var filePath = Path.Combine(_requirementsPath, fileName);
 
@@ -94,17 +95,72 @@ public class FileSystemRequirementRepository : IRequirementRepository
 
         await File.WriteAllTextAsync(filePath, content, cancellationToken);
 
-        _logger.LogInformation("Created requirement file: {FilePath}", filePath);
+        var id = Path.GetFileNameWithoutExtension(fileName);
+
+        // Save codebaseId in metadata file if provided
+        if (!string.IsNullOrEmpty(codebaseId))
+        {
+            await SaveCodebaseIdAsync(id, codebaseId, cancellationToken);
+        }
+
+        _logger.LogInformation("Created requirement file: {FilePath} (codebaseId: {CodebaseId})", filePath, codebaseId ?? "none");
 
         return new RequirementDto
         {
-            Id = Path.GetFileNameWithoutExtension(fileName),
-            Name = Path.GetFileNameWithoutExtension(fileName),
+            Id = id,
+            Name = id,
             Content = content,
             Type = type,
             Status = RequirementStatus.NotStarted,
+            CodebaseId = codebaseId,
             CreatedAt = DateTime.UtcNow
         };
+    }
+
+    /// <summary>
+    /// Save codebase ID for a requirement in a metadata file
+    /// </summary>
+    private async Task SaveCodebaseIdAsync(string requirementId, string codebaseId, CancellationToken cancellationToken)
+    {
+        var metadataDir = Path.Combine(_requirementsPath, requirementId);
+        Directory.CreateDirectory(metadataDir);
+        
+        var metadataPath = Path.Combine(metadataDir, "metadata.json");
+        var metadata = new RequirementMetadata { CodebaseId = codebaseId };
+        
+        var json = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(metadataPath, json, cancellationToken);
+    }
+
+    /// <summary>
+    /// Load codebase ID for a requirement from metadata file
+    /// </summary>
+    private async Task<string?> LoadCodebaseIdAsync(string requirementId, CancellationToken cancellationToken)
+    {
+        var metadataPath = Path.Combine(_requirementsPath, requirementId, "metadata.json");
+        
+        if (!File.Exists(metadataPath))
+            return null;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
+            var metadata = JsonSerializer.Deserialize<RequirementMetadata>(json);
+            return metadata?.CodebaseId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load metadata for requirement: {Id}", requirementId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Metadata stored alongside requirement
+    /// </summary>
+    private class RequirementMetadata
+    {
+        public string? CodebaseId { get; set; }
     }
 
     public async Task UpdateStatusAsync(string id, RequirementStatus status, CancellationToken cancellationToken = default)
@@ -175,7 +231,8 @@ public class FileSystemRequirementRepository : IRequirementRepository
             var extension = Path.GetExtension(filePath).ToLower();
             var content = await File.ReadAllTextAsync(filePath, cancellationToken);
 
-            var type = extension == ".json" ? RequirementType.Multi : RequirementType.Single;
+            // All requirements are now single-project type
+            var type = RequirementType.Single;
             var status = await _approvalRepository.GetStatusAsync(id, cancellationToken);
             var hasTasks = await _taskRepository.HasTasksAsync(id, cancellationToken);
 
@@ -186,6 +243,9 @@ public class FileSystemRequirementRepository : IRequirementRepository
             }
 
             var tasks = await _taskRepository.GetByRequirementAsync(id, cancellationToken);
+            
+            // Load codebaseId from metadata
+            var codebaseId = await LoadCodebaseIdAsync(id, cancellationToken);
 
             return new RequirementDto
             {
@@ -194,6 +254,7 @@ public class FileSystemRequirementRepository : IRequirementRepository
                 Content = content,
                 Type = type,
                 Status = status,
+                CodebaseId = codebaseId,
                 CreatedAt = File.GetCreationTimeUtc(filePath),
                 LastProcessedAt = File.GetLastWriteTimeUtc(filePath),
                 Tasks = tasks.ToList()

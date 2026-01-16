@@ -61,7 +61,7 @@ cd src/AIDevelopmentEasy.Web && npm run dev
 
 #### Web UI Features
 - 📋 **Dashboard** - View all requirements with status indicators
-- ➕ **Create Requirements** - Add new single or multi-project requirements
+- ➕ **Create Requirements** - Add new requirements with optional codebase context
 - 🔄 **Real-time Updates** - Live pipeline progress via SignalR
 - ✅ **Approve/Reject** - Interactive phase approval workflow
 - 📊 **Task Viewer** - See generated tasks and their status
@@ -192,10 +192,12 @@ Swagger UI:  /swagger               - API documentation
 
 ## Agents
 
+Based on the **AgentMesh framework** ([arXiv:2507.19902](https://arxiv.org/pdf/2507.19902)):
+
 | Agent | Role | Responsibility |
 |-------|------|----------------|
 | **PlannerAgent** | Software Project Planner | Analyzes requirements, breaks down into tasks |
-| **MultiProjectPlannerAgent** | Multi-Project Planner | Phase-based planning for multi-project requirements |
+| **CodeAnalysisAgent** | Codebase Analyzer | Analyzes existing codebases for context |
 | **CoderAgent** | Senior Developer | Generates code for each file (following coding standards) |
 | **DebuggerAgent** | Debug Specialist | Compiles with MSBuild, fixes errors |
 | **ReviewerAgent** | Senior Code Reviewer | Final quality control, provides approval |
@@ -215,20 +217,18 @@ Swagger UI:  /swagger               - API documentation
 - **Interface Segregation**: Small, focused interfaces
 
 ### 🤖 Multi-Agent Architecture
-- 5 specialized agents working cooperatively
+- 5 specialized agents working cooperatively (AgentMesh pattern)
 - Communication via shared state (blackboard pattern)
 - Each agent has its own LLM prompt
 - **Editable Prompts** - Markdown files in `prompts/` directory
 
-### 📦 Multi-Project Support
-- Single requirement can affect multiple projects
-- Each project developed with its own test project
-- Phase-based execution (core → consumer → integration)
-- Cross-project dependency management
+### 🔍 Codebase Analysis
+- **CodeAnalysisAgent** analyzes existing codebases
+- Detects projects, patterns, and conventions
+- PlannerAgent uses analysis for context-aware task generation
 
 ### 📝 Task Management
-- Single-project: `requirements/*.txt` or `*.md`
-- Multi-project: `requirements/*.json` (with affected_projects)
+- Requirement files: `requirements/*.txt`, `*.md`, or `*.json`
 - Automatic task decomposition
 - **Editable task files** - edit/delete/add before approval
 
@@ -289,9 +289,9 @@ Two files are used to protect your API keys:
 
 ## Usage
 
-### Single-Project Requirement
+### Creating a Requirement
 
-1. Create a requirement file:
+1. Create a requirement file (`.txt`, `.md`, or `.json`):
 ```
 requirements/log-rotation.md
 ```
@@ -309,43 +309,12 @@ Requirements:
 dotnet run --project src/AIDevelopmentEasy.CLI
 ```
 
-### Multi-Project Requirement
+### With Existing Codebase (Web UI)
 
-1. Create a JSON requirement file:
-```
-requirements/log-rotation.json
-```
-```json
-{
-  "title": "Log Rotation Helper Library",
-  "description": "Implement log rotation capability",
-  "affected_projects": [
-    {
-      "name": "LogRotationHelper",
-      "role": "core",
-      "type": "library",
-      "order": 1,
-      "outputs": [
-        { "file": "LogRotator.cs", "type": "implementation" },
-        { "file": "ILogRotator.cs", "type": "implementation" }
-      ],
-      "test_project": "LogRotationHelper.Tests"
-    },
-    {
-      "name": "LogRotationHelper.Tests",
-      "role": "test",
-      "type": "test",
-      "order": 2,
-      "depends_on": ["LogRotationHelper"],
-      "outputs": [
-        { "file": "LogRotatorTests.cs", "type": "test", "uses": ["LogRotator"] }
-      ]
-    }
-  ]
-}
-```
-
-2. Run, select from menu, and follow the steps
+1. Register your codebase in `codebases/` directory
+2. Create a requirement and associate it with the codebase
+3. The **CodeAnalysisAgent** will analyze the codebase
+4. **PlannerAgent** will use the analysis for context-aware task generation
 
 ## Project Structure
 
@@ -413,7 +382,6 @@ AIDevelopmentEasy/
 ├── 📁 prompts/                          # Agent system prompts (editable)
 │   ├── README.md                        # Prompt documentation
 │   ├── planner.md                       # PlannerAgent prompt
-│   ├── multi-project-planner.md         # MultiProjectPlannerAgent prompt
 │   ├── coder-csharp.md                  # CoderAgent C# prompt
 │   ├── coder-generic.md                 # CoderAgent generic prompt
 │   ├── debugger-csharp.md               # DebuggerAgent C# prompt
@@ -438,7 +406,7 @@ AIDevelopmentEasy/
 | **Consistent Code Quality** | Coding standards always enforced |
 | **Test Coverage** | Automatic unit tests for each feature |
 | **Human-in-the-Loop** | User approval at each step |
-| **Multi-Project Support** | Single requirement for multiple projects |
+| **Codebase Analysis** | Context-aware planning with CodeAnalysisAgent |
 | **No Reprocessing** | Completed work is skipped |
 | **SOLID Architecture** | Maintainable, extensible code |
 

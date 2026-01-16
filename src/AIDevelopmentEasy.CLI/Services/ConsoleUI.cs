@@ -1,6 +1,5 @@
 using AIDevelopmentEasy.CLI.Models;
 using AIDevelopmentEasy.CLI.Services.Interfaces;
-using AIDevelopmentEasy.Core.Models;
 
 namespace AIDevelopmentEasy.CLI.Services;
 
@@ -68,18 +67,13 @@ public class ConsoleUI : IConsoleUI
         for (int i = 0; i < requirements.Count; i++)
         {
             var req = requirements[i];
-            var typeLabel = req.Type == RequirementType.Single ? "Single" : "Multi ";
 
             Console.ForegroundColor = req.Status.ToColor();
             Console.Write($"  [{i + 1}] ");
             Console.ResetColor();
 
             Console.ForegroundColor = ConsoleColor.White;
-            Console.Write($"{req.FileName,-35}");
-            Console.ResetColor();
-
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write($" ({typeLabel}) ");
+            Console.Write($"{req.FileName,-40}");
             Console.ResetColor();
 
             Console.ForegroundColor = req.Status.ToColor();
@@ -251,58 +245,6 @@ public class ConsoleUI : IConsoleUI
 
     #endregion
 
-    #region Project Display
-
-    public void ShowProjectHeader(string projectName, string role)
-    {
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"  ┌─ {projectName} ({role})");
-        Console.ResetColor();
-    }
-
-    public void ShowProjectFooter(int fileCount)
-    {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"  └─ ✓ Completed ({fileCount} files)");
-        Console.ResetColor();
-    }
-
-    public void ShowMultiProjectInfo(MultiProjectRequirement requirement)
-    {
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine($"  Title: {requirement.Title}");
-        Console.ResetColor();
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine($"  {requirement.Description}");
-        Console.ResetColor();
-        Console.WriteLine();
-        Console.WriteLine($"  Affected Projects ({requirement.AffectedProjects.Count}):");
-
-        var projectsByPhase = requirement.AffectedProjects
-            .GroupBy(p => p.Order)
-            .OrderBy(g => g.Key);
-
-        foreach (var phase in projectsByPhase)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"\n    Phase {phase.Key}:");
-            Console.ResetColor();
-            foreach (var proj in phase)
-            {
-                var typeIcon = proj.IsTestProject ? "🧪" : "📦";
-                Console.WriteLine($"      {typeIcon} {proj.Name} ({proj.Role})");
-                if (proj.DependsOn.Count > 0)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine($"         └─ Depends on: {string.Join(", ", proj.DependsOn)}");
-                    Console.ResetColor();
-                }
-            }
-        }
-    }
-
     public void ShowGeneratedTasks(IEnumerable<(int Index, string Title, IEnumerable<string> Files)> tasks)
     {
         ShowSubSection("Generated Tasks");
@@ -311,8 +253,6 @@ public class ConsoleUI : IConsoleUI
             ShowTask(task.Index, task.Title, task.Files);
         }
     }
-
-    #endregion
 
     #region Approvals
 
@@ -493,8 +433,7 @@ public class ConsoleUI : IConsoleUI
         Console.WriteLine();
         Console.WriteLine($"  Add files to: {requirementsPath}");
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("    - Single project: *.txt or *.md");
-        Console.WriteLine("    - Multi-project:  *.json (with affected_projects)");
+        Console.WriteLine("    Supported formats: *.txt, *.md, *.json");
         Console.ResetColor();
     }
 

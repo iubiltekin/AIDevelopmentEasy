@@ -127,7 +127,8 @@ public class ProjectState
 }
 
 /// <summary>
-/// A subtask in the development plan
+/// A subtask in the development plan.
+/// Enhanced with multi-project support for codebase-aware planning.
 /// </summary>
 public record SubTask
 {
@@ -137,6 +138,42 @@ public record SubTask
     public SubTaskStatus Status { get; set; } = SubTaskStatus.Pending;
     public string? GeneratedCode { get; set; }
     public List<string> TargetFiles { get; init; } = new();
+    
+    /// <summary>
+    /// Target project name (for multi-project codebases).
+    /// If null, uses the default/main project.
+    /// </summary>
+    public string? ProjectName { get; init; }
+    
+    /// <summary>
+    /// Indices of tasks that must complete before this one.
+    /// Used for dependency ordering.
+    /// </summary>
+    public List<int> DependsOn { get; init; } = new();
+    
+    /// <summary>
+    /// Existing classes/interfaces from the codebase to use or extend.
+    /// Helps CoderAgent understand context.
+    /// </summary>
+    public List<string> UsesExisting { get; init; } = new();
+    
+    /// <summary>
+    /// Whether this task modifies an existing file (true) or creates a new file (false).
+    /// When true, the Coder should read the existing file and output the complete modified version.
+    /// </summary>
+    public bool IsModification { get; init; } = false;
+    
+    /// <summary>
+    /// Current content of the file to modify (when IsModification is true).
+    /// This is populated before sending to the Coder.
+    /// </summary>
+    public string? CurrentContent { get; set; }
+    
+    /// <summary>
+    /// Full path to the target file in the codebase.
+    /// Used for reading and writing file content.
+    /// </summary>
+    public string? FullPath { get; init; }
 }
 
 public enum SubTaskStatus

@@ -2,7 +2,10 @@ import type {
   RequirementDto, 
   PipelineStatusDto, 
   CreateRequirementRequest,
-  PipelinePhase 
+  PipelinePhase,
+  CodebaseDto,
+  CreateCodebaseRequest,
+  ProjectSummaryDto
 } from '../types';
 
 const API_BASE = '/api';
@@ -119,5 +122,59 @@ export const pipelineApi = {
   getReviewReport: async (requirementId: string): Promise<string> => {
     const response = await fetch(`${API_BASE}/pipeline/${requirementId}/review`);
     return handleResponse<string>(response);
+  }
+};
+
+// Codebases API
+export const codebasesApi = {
+  getAll: async (): Promise<CodebaseDto[]> => {
+    const response = await fetch(`${API_BASE}/codebases`);
+    return handleResponse<CodebaseDto[]>(response);
+  },
+
+  getById: async (id: string): Promise<CodebaseDto> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}`);
+    return handleResponse<CodebaseDto>(response);
+  },
+
+  getAnalysis: async (id: string): Promise<unknown> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/analysis`);
+    return handleResponse<unknown>(response);
+  },
+
+  getContext: async (id: string): Promise<string> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/context`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.text();
+  },
+
+  getProjects: async (id: string): Promise<ProjectSummaryDto[]> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/projects`);
+    return handleResponse<ProjectSummaryDto[]>(response);
+  },
+
+  create: async (request: CreateCodebaseRequest): Promise<CodebaseDto> => {
+    const response = await fetch(`${API_BASE}/codebases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<CodebaseDto>(response);
+  },
+
+  analyze: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/analyze`, {
+      method: 'POST'
+    });
+    await handleResponse<void>(response);
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}`, {
+      method: 'DELETE'
+    });
+    await handleResponse<void>(response);
   }
 };

@@ -8,7 +8,6 @@ public class RequirementInfo
     public string FilePath { get; init; } = string.Empty;
     public string FileName => Path.GetFileName(FilePath);
     public string Name => Path.GetFileNameWithoutExtension(FilePath);
-    public RequirementType Type { get; init; }
     public ProcessingStatus Status { get; private set; } = ProcessingStatus.NotStarted;
     public string WorkingDirectory { get; init; } = string.Empty;
     
@@ -19,9 +18,7 @@ public class RequirementInfo
     {
         var approvedFile = Path.Combine(WorkingDirectory, "_approved.json");
         var completedFile = Path.Combine(WorkingDirectory, "_completed.json");
-        var tasksDir = Type == RequirementType.Single 
-            ? Path.Combine(WorkingDirectory, "tasks")
-            : Path.Combine(WorkingDirectory, "projects");
+        var tasksDir = Path.Combine(WorkingDirectory, "tasks");
 
         if (File.Exists(completedFile))
         {
@@ -45,12 +42,6 @@ public class RequirementInfo
     public void MarkAsApproved() => Status = ProcessingStatus.Approved;
     public void MarkAsInProgress() => Status = ProcessingStatus.InProgress;
     public void MarkAsCompleted() => Status = ProcessingStatus.Completed;
-}
-
-public enum RequirementType
-{
-    Single,
-    Multi
 }
 
 public enum ProcessingStatus

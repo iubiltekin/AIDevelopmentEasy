@@ -1,9 +1,10 @@
-import { Check, Clock, Loader2, AlertCircle, SkipForward, Circle } from 'lucide-react';
+import { Check, Clock, Loader2, AlertCircle, SkipForward, Circle, Search, ListTodo, Code, Bug, FileCheck } from 'lucide-react';
 import { 
   PipelineStatusDto, 
   PhaseState, 
   PipelinePhase,
-  getPhaseLabel 
+  getPhaseLabel,
+  getPhaseAgent
 } from '../types';
 
 interface PipelineStatusProps {
@@ -12,8 +13,42 @@ interface PipelineStatusProps {
   onReject: (phase: PipelinePhase) => void;
 }
 
+// Component to safely display phase result data
+function PhaseResultPreview({ result }: { result: unknown }) {
+  try {
+    const jsonStr = JSON.stringify(result, null, 2);
+    return (
+      <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
+        <pre className="text-xs text-slate-400 overflow-auto max-h-40">
+          {jsonStr}
+        </pre>
+      </div>
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusProps) {
-  const getPhaseIcon = (state: PhaseState) => {
+  // Get icon based on phase type (for running state)
+  const getPhaseTypeIcon = (phase: PipelinePhase) => {
+    switch (phase) {
+      case PipelinePhase.Analysis:
+        return <Search className="w-5 h-5" />;
+      case PipelinePhase.Planning:
+        return <ListTodo className="w-5 h-5" />;
+      case PipelinePhase.Coding:
+        return <Code className="w-5 h-5" />;
+      case PipelinePhase.Debugging:
+        return <Bug className="w-5 h-5" />;
+      case PipelinePhase.Reviewing:
+        return <FileCheck className="w-5 h-5" />;
+      default:
+        return <Circle className="w-5 h-5" />;
+    }
+  };
+
+  const getPhaseIcon = (state: PhaseState, phase: PipelinePhase) => {
     switch (state) {
       case PhaseState.Completed:
         return <Check className="w-5 h-5 text-emerald-400" />;
@@ -26,7 +61,7 @@ export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusPr
       case PhaseState.Skipped:
         return <SkipForward className="w-5 h-5 text-slate-500" />;
       default:
-        return <Circle className="w-5 h-5 text-slate-600" />;
+        return <span className="text-slate-600">{getPhaseTypeIcon(phase)}</span>;
     }
   };
 
@@ -65,10 +100,13 @@ export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusPr
                   'bg-slate-800'
                 }`}
               >
-                {getPhaseIcon(phase.state)}
+                {getPhaseIcon(phase.state, phase.phase)}
               </div>
               <span className="mt-2 text-xs font-medium text-slate-300">
                 {getPhaseLabel(phase.phase)}
+              </span>
+              <span className="text-[10px] text-slate-500">
+                {getPhaseAgent(phase.phase) || ''}
               </span>
               <span className={`text-xs ${
                 phase.state === PhaseState.Completed ? 'text-emerald-400' :
@@ -85,17 +123,27 @@ export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusPr
       </div>
 
       {/* Current Phase Details */}
-      {status.phases.map(phase => (
-        phase.state === PhaseState.WaitingApproval && (
+      {status.phases
+        .filter(phase => phase.state === PhaseState.WaitingApproval)
+        .map(phase => (
           <div 
             key={`approval-${phase.phase}`}
             className="mt-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl animate-slide-in"
           >
-            <h3 className="text-lg font-semibold text-amber-400 mb-2">
-              ⏳ {getPhaseLabel(phase.phase)} - Waiting for Approval
-            </h3>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-amber-400">{getPhaseTypeIcon(phase.phase)}</span>
+              <h3 className="text-lg font-semibold text-amber-400">
+                {getPhaseLabel(phase.phase)} Complete - Waiting for Approval
+              </h3>
+            </div>
+            <div className="text-xs text-slate-400 mb-3">
+              Agent: <span className="text-amber-300">{getPhaseAgent(phase.phase) || 'N/A'}</span>
+            </div>
             {phase.message && (
               <p className="text-slate-300 mb-4">{phase.message}</p>
+            )}
+            {phase.result != null && (
+              <PhaseResultPreview result={phase.result} />
             )}
             <div className="flex gap-3">
               <button
@@ -112,17 +160,21 @@ export function PipelineStatus({ status, onApprove, onReject }: PipelineStatusPr
               </button>
             </div>
           </div>
-        )
-      ))}
+        ))}
 
       {/* Running Phase */}
       {status.phases.some(p => p.state === PhaseState.Running) && (
         <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
           <div className="flex items-center gap-3">
             <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
-            <span className="text-blue-300 font-medium">
-              {getPhaseLabel(status.currentPhase)} in progress...
-            </span>
+            <div>
+              <span className="text-blue-300 font-medium">
+                {getPhaseLabel(status.currentPhase)} in progress...
+              </span>
+              <div className="text-xs text-slate-400">
+                Running: <span className="text-blue-300">{getPhaseAgent(status.currentPhase) || 'N/A'}</span>
+              </div>
+            </div>
           </div>
         </div>
       )}

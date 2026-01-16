@@ -47,7 +47,7 @@ builder.Configuration
 // ════════════════════════════════════════════════════════════════════════════
 var logPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-    "AIDevelopmentEasy", "logs", "aideveasy-.log");
+    "AIDevelopmentEasy", "logs", "api-.log");
 
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
@@ -61,16 +61,25 @@ Log.Logger = new LoggerConfiguration()
 builder.Host.UseSerilog();
 
 // ════════════════════════════════════════════════════════════════════════════
-// Path Configuration
+// Path Configuration - All data stored in ProgramData
 // ════════════════════════════════════════════════════════════════════════════
-var solutionDir = FindSolutionDirectory();
-var requirementsPath = Path.Combine(solutionDir, "requirements");
-var outputPath = Path.Combine(solutionDir, "output");
-var promptsPath = Path.Combine(solutionDir, "prompts");
+var programDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+var appDataDir = Path.Combine(programDataDir, "AIDevelopmentEasy");
 
+var requirementsPath = Path.Combine(appDataDir, "requirements");
+var outputPath = Path.Combine(appDataDir, "output");
+var promptsPath = Path.Combine(appDataDir, "prompts");
+var codebasesPath = Path.Combine(appDataDir, "codebases");
+
+// Ensure all directories exist
+Directory.CreateDirectory(appDataDir);
 Directory.CreateDirectory(requirementsPath);
 Directory.CreateDirectory(outputPath);
 Directory.CreateDirectory(promptsPath);
+Directory.CreateDirectory(codebasesPath);
+
+// Copy default prompts if prompts directory is empty
+CopyDefaultPromptsIfNeeded(promptsPath);
 
 // Initialize PromptLoader
 PromptLoader.Initialize(promptsPath);
@@ -134,12 +143,14 @@ builder.Services.AddSingleton<IRequirementRepository>(sp =>
 builder.Services.AddSingleton<IOutputRepository>(sp =>
     new FileSystemOutputRepository(outputPath, sp.GetRequiredService<ILogger<FileSystemOutputRepository>>()));
 
+builder.Services.AddSingleton<ICodebaseRepository>(sp =>
+    new FileSystemCodebaseRepository(codebasesPath, sp.GetRequiredService<ILogger<FileSystemCodebaseRepository>>()));
+
 // Agents
 builder.Services.AddSingleton(sp =>
-    new PlannerAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<PlannerAgent>>()));
-
+    new CodeAnalysisAgent(sp.GetRequiredService<ILogger<CodeAnalysisAgent>>()));
 builder.Services.AddSingleton(sp =>
-    new MultiProjectPlannerAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<MultiProjectPlannerAgent>>()));
+    new PlannerAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<PlannerAgent>>()));
 
 builder.Services.AddSingleton(sp =>
     new CoderAgent(openAIClient, deploymentName, targetLanguage, sp.GetRequiredService<ILogger<CoderAgent>>()));
@@ -197,6 +208,7 @@ Log.Information("  AIDevelopmentEasy Service Started");
 Log.Information("════════════════════════════════════════════════════════════");
 Log.Information("  Mode: {Mode}", WindowsServiceHelpers.IsWindowsService() ? "Windows Service" : "Console");
 Log.Information("  Requirements: {Path}", requirementsPath);
+Log.Information("  Codebases: {Path}", codebasesPath);
 Log.Information("  Output: {Path}", outputPath);
 Log.Information("  API: /swagger");
 Log.Information("  Web UI: / (if wwwroot exists)");
@@ -207,27 +219,63 @@ app.Run();
 // ════════════════════════════════════════════════════════════════════════════
 // Helper Methods
 // ════════════════════════════════════════════════════════════════════════════
-static string FindSolutionDirectory()
+
+/// <summary>
+/// Copy default prompts to ProgramData if prompts directory is empty.
+/// Tries multiple source locations in order of priority.
+/// </summary>
+static void CopyDefaultPromptsIfNeeded(string promptsPath)
 {
-    // When running as Windows Service, use a fixed data directory
-    if (WindowsServiceHelpers.IsWindowsService())
+    // Skip if prompts already exist
+    if (Directory.EnumerateFiles(promptsPath, "*.md").Any())
+        return;
+
+    // Try sources in priority order:
+    // 1. Application directory (deployed scenario)
+    // 2. Solution directory (development scenario)
+    var possibleSources = new[]
     {
-        var dataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "AIDevelopmentEasy");
-        Directory.CreateDirectory(dataDir);
-        return dataDir;
+        Path.Combine(AppContext.BaseDirectory, "prompts"),
+        FindSolutionPromptsPath()
+    };
+
+    foreach (var sourcePath in possibleSources.Where(p => p != null && Directory.Exists(p)))
+    {
+        var promptFiles = Directory.GetFiles(sourcePath!, "*.md");
+        if (promptFiles.Length > 0)
+        {
+            foreach (var file in promptFiles)
+            {
+                var destFile = Path.Combine(promptsPath, Path.GetFileName(file));
+                if (!File.Exists(destFile))
+                {
+                    File.Copy(file, destFile);
+                    Log.Information("Copied default prompt: {FileName}", Path.GetFileName(file));
+                }
+            }
+            Log.Information("Copied {Count} default prompts from {Source}", promptFiles.Length, sourcePath);
+            return;
+        }
     }
-    
-    // When running in dev mode, find solution directory
+}
+
+/// <summary>
+/// Find prompts directory in solution (for development mode)
+/// </summary>
+static string? FindSolutionPromptsPath()
+{
     var dir = new DirectoryInfo(AppContext.BaseDirectory);
     while (dir != null)
     {
         if (dir.GetFiles("*.sln").Length > 0)
-            return dir.FullName;
+        {
+            var promptsPath = Path.Combine(dir.FullName, "prompts");
+            if (Directory.Exists(promptsPath))
+                return promptsPath;
+        }
         dir = dir.Parent;
     }
-    return AppContext.BaseDirectory;
+    return null;
 }
 
 /// <summary>

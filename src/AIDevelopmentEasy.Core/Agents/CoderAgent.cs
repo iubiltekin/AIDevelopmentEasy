@@ -143,6 +143,22 @@ IMPORTANT: Output ONLY code in a single code block. No explanations before or af
 
     public override async Task<AgentResponse> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
     {
+        // Check if this is a modification task
+        var isModification = request.Context.TryGetValue("is_modification", out var isMod) && isMod == "true";
+        
+        if (isModification)
+        {
+            return await RunModificationAsync(request, cancellationToken);
+        }
+        
+        return await RunGenerationAsync(request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Generate new code (standard mode)
+    /// </summary>
+    private async Task<AgentResponse> RunGenerationAsync(AgentRequest request, CancellationToken cancellationToken)
+    {
         _logger?.LogInformation("[Coder] Starting code generation for task: {Task}",
             request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
 
@@ -213,7 +229,8 @@ Output the code in a markdown code block.";
                 {
                     ["filename"] = targetFile,
                     ["code"] = code,
-                    ["language"] = _targetLanguage
+                    ["language"] = _targetLanguage,
+                    ["is_new_file"] = true
                 },
                 TokensUsed = tokens
             };
@@ -227,6 +244,147 @@ Output the code in a markdown code block.";
                 Error = ex.Message
             };
         }
+    }
+
+    /// <summary>
+    /// Modify existing code (modification mode)
+    /// </summary>
+    private async Task<AgentResponse> RunModificationAsync(AgentRequest request, CancellationToken cancellationToken)
+    {
+        _logger?.LogInformation("[Coder] Starting code MODIFICATION for task: {Task}",
+            request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
+
+        try
+        {
+            // Get the current file content
+            var currentContent = request.Context.TryGetValue("current_content", out var content) ? content : null;
+            var targetFile = request.Context.TryGetValue("target_file", out var tf) ? tf : null;
+            var fullPath = request.Context.TryGetValue("full_path", out var fp) ? fp : null;
+
+            if (string.IsNullOrEmpty(currentContent))
+            {
+                return new AgentResponse
+                {
+                    Success = false,
+                    Error = "Modification task requires current_content in context"
+                };
+            }
+
+            var userPrompt = BuildModificationPrompt(request.Input, currentContent, targetFile);
+
+            var (responseContent, tokens) = await CallLLMAsync(
+                GetModificationSystemPrompt(),
+                userPrompt,
+                temperature: 0.1f,  // Very low temperature for accurate modifications
+                maxTokens: 8000,    // Larger for complete file output
+                cancellationToken);
+
+            _logger?.LogInformation("[Coder] Modification response:\n{Content}", responseContent);
+
+            // Extract the modified code
+            var modifiedCode = ExtractCode(responseContent, _targetLanguage);
+
+            // Update project state with modified code
+            if (request.ProjectState != null && !string.IsNullOrEmpty(targetFile))
+            {
+                request.ProjectState.Codebase[targetFile] = modifiedCode;
+            }
+
+            LogAction(request.ProjectState, "CodeModification", request.Input, 
+                $"Modified {targetFile}: {currentContent.Split('\n').Length} -> {modifiedCode.Split('\n').Length} lines");
+
+            _logger?.LogInformation("[Coder] Modified {File}: {OrigLines} -> {NewLines} lines",
+                targetFile, currentContent.Split('\n').Length, modifiedCode.Split('\n').Length);
+
+            return new AgentResponse
+            {
+                Success = true,
+                Output = modifiedCode,
+                Data = new Dictionary<string, object>
+                {
+                    ["filename"] = targetFile ?? "unknown",
+                    ["full_path"] = fullPath ?? "",
+                    ["code"] = modifiedCode,
+                    ["original_code"] = currentContent,
+                    ["language"] = _targetLanguage,
+                    ["is_new_file"] = false,
+                    ["is_modification"] = true
+                },
+                TokensUsed = tokens
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[Coder] Error during code modification");
+            return new AgentResponse
+            {
+                Success = false,
+                Error = ex.Message
+            };
+        }
+    }
+
+    private string GetModificationSystemPrompt()
+    {
+        return @"You are a **Senior Code Modification Specialist**. Your task is to modify existing source code files according to specific requirements while preserving all existing functionality.
+
+## Critical Rules
+
+1. **PRESERVE ALL EXISTING CODE**: Do not remove or change any existing code unless specifically instructed to
+2. **COMPLETE FILE OUTPUT**: Always output the ENTIRE modified file, not just the changes
+3. **MAINTAIN FORMATTING**: Keep the same indentation, spacing, and style as the original file
+4. **KEEP IMPORTS**: Preserve all existing using/import statements, add new ones if needed
+5. **NO COMMENTS ABOUT CHANGES**: Don't add comments like ""// Modified"" or ""// Added"" - just make the changes
+
+## Modification Guidelines
+
+When adding new code:
+- Add new methods after existing methods in the same class
+- Add new properties after existing properties
+- Add new using statements at the top, alphabetically sorted
+- Follow the naming conventions visible in the existing code
+
+When updating existing code:
+- Keep the same method signature unless explicitly asked to change it
+- Preserve all existing functionality
+- Update only the specific parts mentioned in the task
+
+## Output Format
+
+Output ONLY the complete modified file in a code block:
+
+```csharp
+// The complete file with all modifications applied
+// Including ALL original code plus changes
+```
+
+**IMPORTANT**: 
+- Output ONLY code in a single code block
+- The code block must contain the ENTIRE file, not just changed parts
+- No explanations before or after the code block";
+    }
+
+    private string BuildModificationPrompt(string taskDescription, string currentContent, string? fileName)
+    {
+        return $@"# MODIFICATION TASK
+
+{taskDescription}
+
+# CURRENT FILE CONTENT
+{(string.IsNullOrEmpty(fileName) ? "" : $"File: {fileName}\n")}
+```csharp
+{currentContent}
+```
+
+# INSTRUCTIONS
+
+1. Read the current file content above carefully
+2. Apply the modifications described in the task
+3. Output the COMPLETE modified file (not just the changes)
+4. Preserve ALL existing code that is not being modified
+5. Maintain the same code style and formatting
+
+Output the complete modified file in a markdown code block.";
     }
 
     private string DetermineTargetFile(AgentRequest request, string code)

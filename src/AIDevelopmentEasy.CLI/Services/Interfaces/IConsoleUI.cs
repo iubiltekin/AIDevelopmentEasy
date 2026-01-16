@@ -1,5 +1,4 @@
 using AIDevelopmentEasy.CLI.Models;
-using AIDevelopmentEasy.Core.Models;
 
 namespace AIDevelopmentEasy.CLI.Services.Interfaces;
 
@@ -36,11 +35,6 @@ public interface IConsoleUI
     void ShowTask(int index, string title, IEnumerable<string>? files = null);
     void ShowTaskProgress(int index, string title);
     void ShowTaskResult(bool success, string? message = null);
-    
-    // Project display
-    void ShowProjectHeader(string projectName, string role);
-    void ShowProjectFooter(int fileCount);
-    void ShowMultiProjectInfo(MultiProjectRequirement requirement);
     void ShowGeneratedTasks(IEnumerable<(int Index, string Title, IEnumerable<string> Files)> tasks);
     
     // Approvals - returns true if approved, false if skipped

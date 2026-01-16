@@ -1,5 +1,4 @@
 using AIDevelopmentEasy.CLI.Models;
-using AIDevelopmentEasy.Core.Models;
 
 namespace AIDevelopmentEasy.CLI.Services.Interfaces;
 
@@ -24,12 +23,7 @@ public interface IRequirementLoader
     bool HasRequirements { get; }
     
     /// <summary>
-    /// Loads a single project requirement content
+    /// Loads requirement content from file
     /// </summary>
-    Task<string> LoadSingleProjectRequirementAsync(string filePath);
-    
-    /// <summary>
-    /// Loads a multi-project requirement
-    /// </summary>
-    Task<MultiProjectRequirement?> LoadMultiProjectRequirementAsync(string filePath);
+    Task<string> LoadRequirementAsync(string filePath);
 }

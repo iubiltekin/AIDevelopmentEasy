@@ -10,6 +10,7 @@ public class RequirementDto
     public string Content { get; set; } = string.Empty;
     public RequirementType Type { get; set; }
     public RequirementStatus Status { get; set; }
+    public string? CodebaseId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? LastProcessedAt { get; set; }
     public List<TaskDto> Tasks { get; set; } = new();
@@ -25,7 +26,27 @@ public class TaskDto
     public string Description { get; set; } = string.Empty;
     public string ProjectName { get; set; } = string.Empty;
     public List<string> TargetFiles { get; set; } = new();
+    public List<string> DependsOnProjects { get; set; } = new();
+    public int ProjectOrder { get; set; } = 0;
     public TaskStatus Status { get; set; }
+
+    /// <summary>
+    /// Existing classes/interfaces from the codebase to use or extend.
+    /// Helps CoderAgent understand context when generating code.
+    /// </summary>
+    public List<string> UsesExisting { get; set; } = new();
+
+    /// <summary>
+    /// Whether this task modifies an existing file (true) or creates a new file (false).
+    /// When true, the Coder should read the existing file and output the complete modified version.
+    /// </summary>
+    public bool IsModification { get; set; } = false;
+
+    /// <summary>
+    /// Full path to the target file in the codebase.
+    /// Used for reading existing file content when IsModification is true.
+    /// </summary>
+    public string? FullPath { get; set; }
 }
 
 /// <summary>
@@ -84,11 +105,73 @@ public class PipelineUpdateMessage
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Codebase DTOs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Codebase information for API responses
+/// </summary>
+public class CodebaseDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+    public CodebaseStatus Status { get; set; }
+    public DateTime? AnalyzedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public CodebaseSummaryDto? Summary { get; set; }
+}
+
+/// <summary>
+/// Summary of codebase analysis
+/// </summary>
+public class CodebaseSummaryDto
+{
+    public int TotalSolutions { get; set; }
+    public int TotalProjects { get; set; }
+    public int TotalClasses { get; set; }
+    public int TotalInterfaces { get; set; }
+    public string PrimaryFramework { get; set; } = string.Empty;
+    public List<string> DetectedPatterns { get; set; } = new();
+    public List<string> KeyNamespaces { get; set; } = new();
+}
+
+/// <summary>
+/// Request to register a new codebase
+/// </summary>
+public class CreateCodebaseRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Path { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request to create a requirement with optional codebase
+/// </summary>
+public class CreateRequirementRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public RequirementType Type { get; set; }
+    public string? CodebaseId { get; set; }
+}
+
+/// <summary>
+/// Codebase status
+/// </summary>
+public enum CodebaseStatus
+{
+    Pending,
+    Analyzing,
+    Ready,
+    Failed
+}
+
 // Enums
 public enum RequirementType
 {
-    Single,
-    Multi
+    Single
 }
 
 public enum RequirementStatus
@@ -112,11 +195,11 @@ public enum TaskStatus
 public enum PipelinePhase
 {
     None,
-    Planning,
-    Coding,
-    Debugging,
-    Testing,
-    Reviewing,
+    Analysis,    // CodeAnalysisAgent - Codebase analysis (optional)
+    Planning,    // PlannerAgent - Task decomposition
+    Coding,      // CoderAgent - Code generation/modification
+    Debugging,   // DebuggerAgent - Testing and fixing
+    Reviewing,   // ReviewerAgent - Quality review
     Completed
 }
 

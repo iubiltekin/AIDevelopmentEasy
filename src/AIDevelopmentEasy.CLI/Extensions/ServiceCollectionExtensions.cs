@@ -61,13 +61,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp =>
         {
             var client = sp.GetRequiredService<OpenAIClient>();
-            var settings = sp.GetRequiredService<AzureOpenAISettings>();
-            return new MultiProjectPlannerAgent(client, settings.DeploymentName, loggerFactory.CreateLogger<MultiProjectPlannerAgent>());
-        });
-
-        services.AddSingleton(sp =>
-        {
-            var client = sp.GetRequiredService<OpenAIClient>();
             var azureSettings = sp.GetRequiredService<AzureOpenAISettings>();
             var appSettings = sp.GetRequiredService<AIDevelopmentEasySettings>();
             return new CoderAgent(client, azureSettings.DeploymentName, appSettings.TargetLanguage, loggerFactory.CreateLogger<CoderAgent>());

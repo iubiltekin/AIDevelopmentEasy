@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.IO;
 using AIDevelopmentEasy.Api.Hubs;
 using AIDevelopmentEasy.Api.Models;
 using AIDevelopmentEasy.Api.Repositories.Interfaces;
 using AIDevelopmentEasy.Api.Services.Interfaces;
 using AIDevelopmentEasy.Core.Agents;
 using AIDevelopmentEasy.Core.Agents.Base;
+using AIDevelopmentEasy.Core.Models;
 
 // Use Api.Models.PipelinePhase to avoid ambiguity with Core.Agents.Base.PipelinePhase
 using PipelinePhase = AIDevelopmentEasy.Api.Models.PipelinePhase;
@@ -13,8 +15,17 @@ using CorePipelinePhase = AIDevelopmentEasy.Core.Agents.Base.PipelinePhase;
 namespace AIDevelopmentEasy.Api.Services;
 
 /// <summary>
-/// Pipeline orchestration service.
-/// Manages the execution of the multi-agent pipeline with approval gates.
+/// Pipeline orchestration service based on AgentMesh framework (arXiv:2507.19902).
+/// 
+/// Manages the execution of the multi-agent pipeline with approval gates:
+/// 1. Planning - PlannerAgent decomposes requirements into tasks (with codebase context)
+/// 2. Coding - CoderAgent generates code for each task
+/// 3. Debugging - DebuggerAgent tests and fixes code
+/// 4. Testing - Test analysis and execution
+/// 5. Reviewing - ReviewerAgent validates final output
+/// 
+/// When a codebase is associated with the requirement, CodeAnalysisAgent provides
+/// context about existing projects, patterns, and conventions to the PlannerAgent.
 /// </summary>
 public class PipelineService : IPipelineService
 {
@@ -22,12 +33,13 @@ public class PipelineService : IPipelineService
     private readonly ITaskRepository _taskRepository;
     private readonly IApprovalRepository _approvalRepository;
     private readonly IOutputRepository _outputRepository;
+    private readonly ICodebaseRepository _codebaseRepository;
     private readonly IPipelineNotificationService _notificationService;
     private readonly PlannerAgent _plannerAgent;
-    private readonly MultiProjectPlannerAgent _multiProjectPlannerAgent;
     private readonly CoderAgent _coderAgent;
     private readonly DebuggerAgent _debuggerAgent;
     private readonly ReviewerAgent _reviewerAgent;
+    private readonly CodeAnalysisAgent _codeAnalysisAgent;
     private readonly ILogger<PipelineService> _logger;
 
     // Track running pipelines and their state
@@ -38,24 +50,26 @@ public class PipelineService : IPipelineService
         ITaskRepository taskRepository,
         IApprovalRepository approvalRepository,
         IOutputRepository outputRepository,
+        ICodebaseRepository codebaseRepository,
         IPipelineNotificationService notificationService,
         PlannerAgent plannerAgent,
-        MultiProjectPlannerAgent multiProjectPlannerAgent,
         CoderAgent coderAgent,
         DebuggerAgent debuggerAgent,
         ReviewerAgent reviewerAgent,
+        CodeAnalysisAgent codeAnalysisAgent,
         ILogger<PipelineService> logger)
     {
         _requirementRepository = requirementRepository;
         _taskRepository = taskRepository;
         _approvalRepository = approvalRepository;
         _outputRepository = outputRepository;
+        _codebaseRepository = codebaseRepository;
         _notificationService = notificationService;
         _plannerAgent = plannerAgent;
-        _multiProjectPlannerAgent = multiProjectPlannerAgent;
         _coderAgent = coderAgent;
         _debuggerAgent = debuggerAgent;
         _reviewerAgent = reviewerAgent;
+        _codeAnalysisAgent = codeAnalysisAgent;
         _logger = logger;
     }
 
@@ -113,40 +127,40 @@ public class PipelineService : IPipelineService
         });
     }
 
-    public async Task<bool> ApprovePhaseAsync(string requirementId, PipelinePhase phase, CancellationToken cancellationToken = default)
+    public Task<bool> ApprovePhaseAsync(string requirementId, PipelinePhase phase, CancellationToken cancellationToken = default)
     {
         if (!_runningPipelines.TryGetValue(requirementId, out var execution))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         if (execution.CurrentPhase != phase || execution.PhaseApprovalTcs == null)
         {
             _logger.LogWarning("Cannot approve phase {Phase} - current phase is {CurrentPhase}", phase, execution.CurrentPhase);
-            return false;
+            return Task.FromResult(false);
         }
 
         execution.PhaseApprovalTcs.TrySetResult(true);
         _logger.LogInformation("[{RequirementId}] Phase {Phase} approved", requirementId, phase);
-        return true;
+        return Task.FromResult(true);
     }
 
-    public async Task<bool> RejectPhaseAsync(string requirementId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default)
+    public Task<bool> RejectPhaseAsync(string requirementId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default)
     {
         if (!_runningPipelines.TryGetValue(requirementId, out var execution))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         if (execution.CurrentPhase != phase || execution.PhaseApprovalTcs == null)
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         execution.RejectionReason = reason;
         execution.PhaseApprovalTcs.TrySetResult(false);
         _logger.LogInformation("[{RequirementId}] Phase {Phase} rejected. Reason: {Reason}", requirementId, phase, reason);
-        return true;
+        return Task.FromResult(true);
     }
 
     public Task CancelAsync(string requirementId, CancellationToken cancellationToken = default)
@@ -193,25 +207,125 @@ public class PipelineService : IPipelineService
             }
 
             var requirement = await _requirementRepository.GetByIdAsync(requirementId, ct);
-            var isMultiProject = requirement?.Type == RequirementType.Multi;
 
-            // Phase 1: Planning
+            // Phase 1: Analysis (optional - only when codebase is linked)
+            Core.Models.CodebaseAnalysis? codebaseAnalysis = null;
+            ClassSearchResult? classResult = null;
+            ReferenceSearchResult? referenceResult = null;
+            
+            if (!string.IsNullOrEmpty(requirement?.CodebaseId))
+            {
+                var analysisResult = await ExecutePhaseAsync(execution, PipelinePhase.Analysis, async () =>
+                {
+                    await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Analysis, 
+                        "CodeAnalysisAgent analyzing codebase...");
+
+                    await _notificationService.NotifyProgressAsync(requirementId, $"Loading codebase: {requirement.CodebaseId}");
+                    codebaseAnalysis = await _codebaseRepository.GetAnalysisAsync(requirement.CodebaseId, ct);
+                    
+                    if (codebaseAnalysis == null)
+                    {
+                        throw new InvalidOperationException($"Codebase analysis not found: {requirement.CodebaseId}");
+                    }
+
+                    var summary = codebaseAnalysis.Summary;
+                    await _notificationService.NotifyProgressAsync(requirementId, 
+                        $"Codebase loaded: {summary.TotalProjects} projects, {summary.TotalClasses} classes");
+
+                    // Try to extract target class from requirement
+                    var targetClassName = ExtractTargetClassName(content);
+                    
+                    if (!string.IsNullOrEmpty(targetClassName))
+                    {
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            $"Detected target class: {targetClassName}, finding references...");
+                        
+                        classResult = await _codeAnalysisAgent.FindClassAsync(codebaseAnalysis, targetClassName, includeContent: true);
+                        
+                        if (classResult.Found)
+                        {
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"Found class at: {classResult.FilePath}");
+                            
+                            referenceResult = await _codeAnalysisAgent.FindReferencesAsync(codebaseAnalysis, targetClassName, ct);
+                            
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"Found {referenceResult.References.Count} references in {referenceResult.AffectedFiles.Count} files");
+                        }
+                        else
+                        {
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"Class '{targetClassName}' not found, will create new code");
+                        }
+                    }
+
+                    return new
+                    {
+                        CodebaseName = codebaseAnalysis.CodebaseName,
+                        CodebasePath = codebaseAnalysis.CodebasePath,
+                        TotalProjects = summary.TotalProjects,
+                        TotalClasses = summary.TotalClasses,
+                        TotalInterfaces = summary.TotalInterfaces,
+                        Patterns = summary.DetectedPatterns,
+                        TargetClass = targetClassName,
+                        ClassFound = classResult?.Found ?? false,
+                        ClassFilePath = classResult?.FullPath,
+                        ReferenceCount = referenceResult?.References.Count ?? 0,
+                        AffectedFiles = referenceResult?.AffectedFiles ?? new List<string>()
+                    };
+                }, ct);
+
+                if (!analysisResult.Approved) return;
+            }
+            else
+            {
+                // Skip analysis phase - no codebase linked
+                var analysisPhaseStatus = execution.Status.Phases.FirstOrDefault(p => p.Phase == PipelinePhase.Analysis);
+                if (analysisPhaseStatus != null)
+                {
+                    analysisPhaseStatus.State = PhaseState.Skipped;
+                    analysisPhaseStatus.Message = "No codebase linked";
+                }
+            }
+
+            // Phase 2: Planning (with codebase context if available)
             var planningResult = await ExecutePhaseAsync(execution, PipelinePhase.Planning, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Planning, "Analyzing requirements...");
+                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Planning, 
+                    "PlannerAgent decomposing requirements into tasks...");
 
                 var projectState = new ProjectState { Requirement = content };
-                var request = new AgentRequest { Input = content, ProjectState = projectState };
-
                 AgentResponse response;
-                if (isMultiProject)
+                
+                if (codebaseAnalysis != null)
                 {
-                    var multiReq = System.Text.Json.JsonSerializer.Deserialize<AIDevelopmentEasy.Core.Models.MultiProjectRequirement>(content);
-                    if (multiReq == null) throw new InvalidOperationException("Invalid multi-project requirement format");
-                    response = await _multiProjectPlannerAgent.PlanMultiProjectAsync(multiReq, projectState, ct);
+                    _logger.LogInformation("[Planning] Using codebase-aware planning for: {CodebaseId}", requirement?.CodebaseId);
+                    
+                    if (classResult?.Found == true && referenceResult != null)
+                    {
+                        // Modification planning with class/reference context
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            "Creating modification plan for existing class and references...");
+                        
+                        var modificationTasks = await _codeAnalysisAgent.CreateModificationTasksAsync(
+                            codebaseAnalysis, referenceResult, content, ct);
+                        
+                        response = await _plannerAgent.PlanModificationAsync(
+                            content, classResult, referenceResult, modificationTasks, codebaseAnalysis, ct);
+                        
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            "Modification plan created - will update existing files");
+                    }
+                    else
+                    {
+                        // Standard planning with codebase context
+                        response = await _plannerAgent.PlanWithCodebaseAsync(content, codebaseAnalysis, projectState, ct);
+                    }
                 }
                 else
                 {
+                    // Standard planning without codebase context
+                    var request = new AgentRequest { Input = content, ProjectState = projectState };
                     response = await _plannerAgent.RunAsync(request, ct);
                 }
 
@@ -220,11 +334,19 @@ public class PipelineService : IPipelineService
                     throw new InvalidOperationException($"Planning failed: {response.Error}");
                 }
 
-                // Convert and save tasks
+                // Convert and save tasks (including modification metadata)
                 var tasks = ConvertToTaskDtos(response.Data);
                 await _taskRepository.SaveTasksAsync(requirementId, tasks, ct);
 
-                return tasks;
+                var modificationCount = tasks.Count(t => t.IsModification);
+                
+                return new
+                {
+                    TaskCount = tasks.Count,
+                    ModificationCount = modificationCount,
+                    NewFileCount = tasks.Count - modificationCount,
+                    Tasks = tasks.Select(t => new { t.Index, t.Title, t.IsModification, t.TargetFiles }).ToList()
+                };
             }, ct);
 
             if (!planningResult.Approved) return;
@@ -232,73 +354,187 @@ public class PipelineService : IPipelineService
             // Approve plan
             await _approvalRepository.ApprovePlanAsync(requirementId, ct);
 
-            // Phase 2: Coding
+            // Phase 2: Coding (with modification support and parallel execution by project)
             var codingResult = await ExecutePhaseAsync(execution, PipelinePhase.Coding, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding, "Generating code...");
+                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding, "Generating/Modifying code...");
 
-                var tasks = await _taskRepository.GetByRequirementAsync(requirementId, ct);
+                var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
                 var projectState = new ProjectState { Requirement = content };
-                var generatedFiles = new Dictionary<string, string>();
+                var generatedFiles = new ConcurrentDictionary<string, string>();
+                var modifiedFiles = new ConcurrentDictionary<string, string>();
 
-                foreach (var task in tasks)
+                // Check if any tasks are modifications
+                var hasModifications = tasks.Any(t => t.IsModification);
+                if (hasModifications)
+                {
+                    await _notificationService.NotifyProgressAsync(requirementId, 
+                        "Mode: MODIFICATION - will update existing files in the codebase");
+                }
+
+                // Group tasks by project
+                var projectGroups = GroupTasksByProject(tasks);
+                var completedProjects = new ConcurrentDictionary<string, bool>();
+
+                await _notificationService.NotifyProgressAsync(requirementId, 
+                    $"Found {projectGroups.Count} project(s): {string.Join(", ", projectGroups.Select(g => g.ProjectName))}");
+
+                // Process projects in dependency order, parallelize where possible
+                var processingLevels = GetProcessingLevels(projectGroups);
+                
+                foreach (var level in processingLevels)
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Generating: {task.Title}");
+                    await _notificationService.NotifyProgressAsync(requirementId, 
+                        $"Processing level {level.Key + 1}: {string.Join(", ", level.Value.Select(g => g.ProjectName))} (parallel)");
 
-                    var request = new AgentRequest
+                    // Process all projects in this level in parallel
+                    var levelTasks = level.Value.Select(async projectGroup =>
                     {
-                        Input = task.Description,
-                        ProjectState = projectState,
-                        Context = new Dictionary<string, string>
+                        var projectFiles = new Dictionary<string, string>();
+
+                        foreach (var task in projectGroup.Tasks)
                         {
-                            ["task_index"] = task.Index.ToString(),
-                            ["target_file"] = task.TargetFiles.FirstOrDefault() ?? ""
-                        }
-                    };
+                            ct.ThrowIfCancellationRequested();
 
-                    var response = await _coderAgent.RunAsync(request, ct);
-                    if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
-                        response.Data.TryGetValue("code", out var code))
-                    {
-                        generatedFiles[filename.ToString()!] = code.ToString()!;
-                        projectState.Codebase[filename.ToString()!] = code.ToString()!;
-                    }
+                            var actionType = task.IsModification ? "Modifying" : "Generating";
+                            await _notificationService.NotifyProgressAsync(requirementId, 
+                                $"[{projectGroup.ProjectName}] {actionType}: {task.Title}");
+
+                            // Use modification-aware coding if codebase is available
+                            AgentResponse response;
+                            if (codebaseAnalysis != null && !string.IsNullOrEmpty(requirement?.CodebaseId))
+                            {
+                                response = await ExecuteModificationCodingAsync(task, projectState, requirement.CodebaseId, codebaseAnalysis, ct);
+                            }
+                            else
+                            {
+                                response = await ExecuteGenerationCodingAsync(task, projectState, ct);
+                            }
+
+                            if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
+                                response.Data.TryGetValue("code", out var code))
+                            {
+                                var fileKey = $"{projectGroup.ProjectName}/{filename}";
+                                projectFiles[fileKey] = code.ToString()!;
+                                generatedFiles[fileKey] = code.ToString()!;
+
+                                // Track if this was a modification
+                                if (response.Data.TryGetValue("is_modification", out var isMod) && (bool)isMod)
+                                {
+                                    modifiedFiles[fileKey] = code.ToString()!;
+                                    
+                                    // If we have the full path, we could write back to the original file
+                                    if (response.Data.TryGetValue("full_path", out var fullPath) && !string.IsNullOrEmpty(fullPath?.ToString()))
+                                    {
+                                        _logger.LogInformation("[Coding] Modified file ready to write: {FullPath}", fullPath);
+                                        // Note: Actual file write should happen after review/approval
+                                    }
+                                }
+                            }
+
+                            // Update task status
+                            task.Status = Models.TaskStatus.Completed;
+                            await _taskRepository.UpdateTaskAsync(requirementId, task, ct);
+                        }
+
+                        completedProjects[projectGroup.ProjectName] = true;
+                        await _notificationService.NotifyProgressAsync(requirementId, 
+                            $"[{projectGroup.ProjectName}] Completed ({projectFiles.Count} files)");
+
+                        return projectFiles;
+                    });
+
+                    // Wait for all projects in this level to complete
+                    await Task.WhenAll(levelTasks);
+                }
+
+                // Update shared project state with all generated files
+                foreach (var kvp in generatedFiles)
+                {
+                    projectState.Codebase[kvp.Key] = kvp.Value;
                 }
 
                 // Save output
-                var outputPath = await _outputRepository.SaveOutputAsync(requirementId, requirement?.Name ?? requirementId, generatedFiles, ct);
-                return new { Files = generatedFiles, OutputPath = outputPath };
+                var outputPath = await _outputRepository.SaveOutputAsync(
+                    requirementId, 
+                    requirement?.Name ?? requirementId, 
+                    generatedFiles.ToDictionary(k => k.Key, v => v.Value), 
+                    ct);
+
+                return new 
+                { 
+                    Files = generatedFiles.ToDictionary(k => k.Key, v => v.Value), 
+                    ModifiedFiles = modifiedFiles.ToDictionary(k => k.Key, v => v.Value),
+                    OutputPath = outputPath,
+                    ProjectCount = projectGroups.Count,
+                    ParallelLevels = processingLevels.Count,
+                    ModificationCount = modifiedFiles.Count
+                };
             }, ct);
 
             if (!codingResult.Approved) return;
 
-            // Phase 3: Debugging
+            // Phase 4: Debugging (DebuggerAgent - verify and fix code)
             var debugResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging, "Running compilation check...");
+                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging, 
+                    "DebuggerAgent verifying and fixing code...");
 
-                // For now, just validate syntax - full debugging would require MSBuild
-                await _notificationService.NotifyProgressAsync(requirementId, "Compilation check completed");
-                return new { Success = true, Message = "Syntax validation passed" };
+                var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                var projectState = new ProjectState
+                {
+                    Requirement = content,
+                    Codebase = files
+                };
+
+                await _notificationService.NotifyProgressAsync(requirementId, $"Checking {files.Count} generated files...");
+
+                // Run debugger agent for verification
+                var verificationResults = new List<object>();
+                foreach (var (filename, code) in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    
+                    var request = new AgentRequest
+                    {
+                        Input = $"Verify this code compiles correctly and has no bugs:\n\n{code}",
+                        ProjectState = projectState,
+                        Context = new Dictionary<string, string> { ["filename"] = filename }
+                    };
+                    
+                    var response = await _debuggerAgent.RunAsync(request, ct);
+                    var hasIssues = response.Data.TryGetValue("has_issues", out var issues) && (bool)issues;
+                    
+                    verificationResults.Add(new { 
+                        Filename = filename, 
+                        Passed = !hasIssues,
+                        Issues = hasIssues ? response.Data.GetValueOrDefault("issues", "") : null
+                    });
+                }
+
+                var failedCount = verificationResults.Count(r => 
+                    r.GetType().GetProperty("Passed")?.GetValue(r) is false);
+
+                await _notificationService.NotifyProgressAsync(requirementId, 
+                    failedCount == 0 
+                        ? "All files verified successfully" 
+                        : $"{failedCount} file(s) need attention");
+
+                return new 
+                { 
+                    Success = failedCount == 0, 
+                    TotalFiles = files.Count,
+                    PassedFiles = files.Count - failedCount,
+                    FailedFiles = failedCount,
+                    Results = verificationResults
+                };
             }, ct);
 
             if (!debugResult.Approved) return;
 
-            // Phase 4: Testing
-            var testResult = await ExecutePhaseAsync(execution, PipelinePhase.Testing, async () =>
-            {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Testing, "Analyzing test coverage...");
-
-                // For now, just acknowledge tests - full testing would require running NUnit
-                await Task.Delay(500, ct); // Simulate test run
-                return new { Passed = 0, Failed = 0, Message = "Test analysis completed" };
-            }, ct);
-
-            if (!testResult.Approved) return;
-
-            // Phase 5: Review
+            // Phase 5: Review (ReviewerAgent - quality check)
             var reviewResult = await ExecutePhaseAsync(execution, PipelinePhase.Reviewing, async () =>
             {
                 await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Reviewing, "Running code review...");
@@ -428,11 +664,11 @@ public class PipelineService : IPipelineService
             IsRunning = false,
             Phases = new List<PhaseStatusDto>
             {
-                new() { Phase = PipelinePhase.Planning, State = PhaseState.Pending },
-                new() { Phase = PipelinePhase.Coding, State = PhaseState.Pending },
-                new() { Phase = PipelinePhase.Debugging, State = PhaseState.Pending },
-                new() { Phase = PipelinePhase.Testing, State = PhaseState.Pending },
-                new() { Phase = PipelinePhase.Reviewing, State = PhaseState.Pending }
+                new() { Phase = PipelinePhase.Analysis, State = PhaseState.Pending },   // CodeAnalysisAgent
+                new() { Phase = PipelinePhase.Planning, State = PhaseState.Pending },   // PlannerAgent
+                new() { Phase = PipelinePhase.Coding, State = PhaseState.Pending },     // CoderAgent
+                new() { Phase = PipelinePhase.Debugging, State = PhaseState.Pending },  // DebuggerAgent
+                new() { Phase = PipelinePhase.Reviewing, State = PhaseState.Pending }   // ReviewerAgent
             }
         };
     }
@@ -440,19 +676,55 @@ public class PipelineService : IPipelineService
     private List<TaskDto> ConvertToTaskDtos(Dictionary<string, object> data)
     {
         var tasks = new List<TaskDto>();
+        int globalIndex = 1;
 
+        // Handle tasks from enhanced PlannerAgent (supports modification-aware planning)
         if (data.TryGetValue("tasks", out var tasksObj) && tasksObj is List<SubTask> subTasks)
         {
-            foreach (var st in subTasks)
+            // Get modification task metadata if available
+            var modificationTasks = data.TryGetValue("modification_tasks", out var modTasksObj) 
+                ? modTasksObj as List<FileModificationTask> 
+                : null;
+
+            // Group tasks by project for ordering
+            var tasksByProject = subTasks
+                .GroupBy(t => t.ProjectName ?? "default")
+                .ToList();
+
+            int projectOrder = 0;
+            foreach (var projectGroup in tasksByProject)
             {
-                tasks.Add(new TaskDto
+                foreach (var st in projectGroup.OrderBy(t => t.Index))
                 {
-                    Index = st.Index,
-                    Title = st.Title,
-                    Description = st.Description,
-                    TargetFiles = st.TargetFiles,
-                    Status = Models.TaskStatus.Pending
-                });
+                    // Convert DependsOn (task indices) to DependsOnProjects (project names)
+                    var dependsOnProjects = st.DependsOn
+                        .Select(idx => subTasks.FirstOrDefault(t => t.Index == idx)?.ProjectName)
+                        .Where(p => !string.IsNullOrEmpty(p) && p != projectGroup.Key)
+                        .Distinct()
+                        .ToList();
+
+                    // Find matching modification task for full path
+                    var targetFile = st.TargetFiles.FirstOrDefault() ?? "";
+                    var matchingModTask = modificationTasks?.FirstOrDefault(mt => 
+                        mt.FilePath.EndsWith(targetFile, StringComparison.OrdinalIgnoreCase) ||
+                        targetFile.EndsWith(mt.FilePath, StringComparison.OrdinalIgnoreCase));
+
+                    tasks.Add(new TaskDto
+                    {
+                        Index = globalIndex++,
+                        Title = st.Title,
+                        Description = st.Description,
+                        TargetFiles = st.TargetFiles,
+                        ProjectName = st.ProjectName ?? "default",
+                        DependsOnProjects = dependsOnProjects!,
+                        ProjectOrder = projectOrder,
+                        Status = Models.TaskStatus.Pending,
+                        UsesExisting = st.UsesExisting,
+                        IsModification = st.IsModification,
+                        FullPath = st.FullPath ?? matchingModTask?.FullPath
+                    });
+                }
+                projectOrder++;
             }
         }
 
@@ -474,5 +746,264 @@ public class PipelineService : IPipelineService
     {
         public bool Approved { get; set; }
         public object? Result { get; set; }
+    }
+
+    /// <summary>
+    /// Groups tasks by their project name for parallel execution
+    /// </summary>
+    private List<ProjectTaskGroup> GroupTasksByProject(List<TaskDto> tasks)
+    {
+        var groups = tasks
+            .GroupBy(t => string.IsNullOrEmpty(t.ProjectName) ? "default" : t.ProjectName)
+            .Select(g => new ProjectTaskGroup
+            {
+                ProjectName = g.Key,
+                Order = g.Min(t => t.ProjectOrder),
+                DependsOn = g.SelectMany(t => t.DependsOnProjects).Distinct().ToList(),
+                Tasks = g.OrderBy(t => t.Index).ToList()
+            })
+            .OrderBy(g => g.Order)
+            .ToList();
+
+        return groups;
+    }
+
+    /// <summary>
+    /// Organizes project groups into processing levels based on dependencies.
+    /// Projects in the same level can be processed in parallel.
+    /// </summary>
+    private Dictionary<int, List<ProjectTaskGroup>> GetProcessingLevels(List<ProjectTaskGroup> projectGroups)
+    {
+        var levels = new Dictionary<int, List<ProjectTaskGroup>>();
+        var assigned = new HashSet<string>();
+        var currentLevel = 0;
+
+        while (assigned.Count < projectGroups.Count)
+        {
+            var levelGroups = new List<ProjectTaskGroup>();
+
+            foreach (var group in projectGroups)
+            {
+                if (assigned.Contains(group.ProjectName))
+                    continue;
+
+                // Check if all dependencies are satisfied
+                var dependenciesMet = group.DependsOn.All(dep => 
+                    assigned.Contains(dep) || !projectGroups.Any(g => g.ProjectName == dep));
+
+                if (dependenciesMet)
+                {
+                    levelGroups.Add(group);
+                }
+            }
+
+            if (levelGroups.Count == 0 && assigned.Count < projectGroups.Count)
+            {
+                // Circular dependency detected, add remaining as final level
+                _logger.LogWarning("Possible circular dependency detected in project groups");
+                levelGroups = projectGroups.Where(g => !assigned.Contains(g.ProjectName)).ToList();
+            }
+
+            foreach (var group in levelGroups)
+            {
+                assigned.Add(group.ProjectName);
+            }
+
+            if (levelGroups.Count > 0)
+            {
+                levels[currentLevel] = levelGroups;
+                currentLevel++;
+            }
+        }
+
+        return levels;
+    }
+
+    /// <summary>
+    /// Try to extract a class name from the requirement text for modification planning.
+    /// Returns null if no specific class is mentioned.
+    /// </summary>
+    private string? ExtractTargetClassName(string requirement)
+    {
+        // Common words to exclude (not class names)
+        var excludeWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
+        { 
+            "the", "a", "an", "this", "that", "new", "code", "method", "function", 
+            "class", "interface", "add", "update", "modify", "change", "fix", "create",
+            "test", "init", "with", "for", "from", "into", "parameter", "keepalive"
+        };
+
+        // Pattern 1: Look for PascalCase class names (e.g., DigitalApiClient, LogRotator)
+        var pascalCasePattern = @"\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b";
+        var pascalMatches = System.Text.RegularExpressions.Regex.Matches(requirement, pascalCasePattern);
+        foreach (System.Text.RegularExpressions.Match match in pascalMatches)
+        {
+            var className = match.Groups[1].Value;
+            if (!excludeWords.Contains(className) && className.Length > 3)
+            {
+                _logger.LogInformation("[ExtractClassName] Found PascalCase class: {ClassName}", className);
+                return className;
+            }
+        }
+
+        // Pattern 2: Look for explicit class mentions
+        var patterns = new[]
+        {
+            @"(?:modify|update|change|extend|add\s+to|fix)\s+(?:the\s+)?([A-Z]\w+)(?:\s+class)?",
+            @"([A-Z]\w+)(?:\.cs|\.Init|\.Create|\s+class|\s+sınıf|\s+sınıfı)",
+            @"(?:in|to|for)\s+(?:the\s+)?([A-Z]\w+)",
+        };
+
+        foreach (var pattern in patterns)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                requirement, pattern, System.Text.RegularExpressions.RegexOptions.None);
+            
+            if (match.Success)
+            {
+                var className = match.Groups[1].Value;
+                if (!excludeWords.Contains(className) && className.Length > 2)
+                {
+                    _logger.LogInformation("[ExtractClassName] Found class via pattern: {ClassName}", className);
+                    return className;
+                }
+            }
+        }
+
+        _logger.LogInformation("[ExtractClassName] No class name detected in requirement");
+        return null;
+    }
+
+    /// <summary>
+    /// Execute modification-aware planning using CodeAnalysisAgent
+    /// </summary>
+    private async Task<AgentResponse> ExecuteModificationPlanningAsync(
+        string requirement,
+        string codebaseId,
+        Core.Models.CodebaseAnalysis analysis,
+        CancellationToken ct)
+    {
+        // Try to extract the target class name from the requirement
+        var targetClassName = ExtractTargetClassName(requirement);
+        
+        if (string.IsNullOrEmpty(targetClassName))
+        {
+            _logger.LogInformation("[Planning] No specific class detected in requirement, using standard planning");
+            return await _plannerAgent.PlanWithCodebaseAsync(requirement, analysis, null, ct);
+        }
+
+        _logger.LogInformation("[Planning] Detected target class: {ClassName}, searching for references", targetClassName);
+
+        // Find the class
+        var classResult = await _codeAnalysisAgent.FindClassAsync(analysis, targetClassName, includeContent: true);
+        
+        if (!classResult.Found)
+        {
+            _logger.LogWarning("[Planning] Class {ClassName} not found in codebase, using standard planning", targetClassName);
+            return await _plannerAgent.PlanWithCodebaseAsync(requirement, analysis, null, ct);
+        }
+
+        _logger.LogInformation("[Planning] Found class {ClassName} at {FilePath}", targetClassName, classResult.FilePath);
+
+        // Find all references to the class
+        var referenceResult = await _codeAnalysisAgent.FindReferencesAsync(analysis, targetClassName, ct);
+        
+        _logger.LogInformation("[Planning] Found {RefCount} references in {FileCount} files", 
+            referenceResult.References.Count, referenceResult.AffectedFiles.Count);
+
+        // Create modification tasks
+        var modificationTasks = await _codeAnalysisAgent.CreateModificationTasksAsync(
+            analysis, referenceResult, $"Modification for: {requirement}", ct);
+
+        // Use modification planning
+        return await _plannerAgent.PlanModificationAsync(
+            requirement,
+            classResult,
+            referenceResult,
+            modificationTasks,
+            analysis,
+            ct);
+    }
+
+    /// <summary>
+    /// Execute coding with modification support
+    /// </summary>
+    private async Task<AgentResponse> ExecuteModificationCodingAsync(
+        TaskDto task,
+        ProjectState projectState,
+        string codebaseId,
+        Core.Models.CodebaseAnalysis analysis,
+        CancellationToken ct)
+    {
+        // Check if this task is a modification task
+        if (task.IsModification && !string.IsNullOrEmpty(task.FullPath))
+        {
+            // Load the current file content
+            var currentContent = await _codeAnalysisAgent.GetFileContentAsync(task.FullPath);
+            
+            if (string.IsNullOrEmpty(currentContent))
+            {
+                _logger.LogWarning("[Coding] Could not load content for modification task: {FilePath}", task.FullPath);
+                // Fall back to generation mode
+                return await ExecuteGenerationCodingAsync(task, projectState, ct);
+            }
+
+            _logger.LogInformation("[Coding] Executing modification for: {FilePath}", task.FullPath);
+
+            var request = new AgentRequest
+            {
+                Input = task.Description,
+                ProjectState = projectState,
+                Context = new Dictionary<string, string>
+                {
+                    ["is_modification"] = "true",
+                    ["current_content"] = currentContent,
+                    ["target_file"] = task.TargetFiles.FirstOrDefault() ?? Path.GetFileName(task.FullPath),
+                    ["full_path"] = task.FullPath,
+                    ["task_index"] = task.Index.ToString(),
+                    ["project_name"] = task.ProjectName ?? "default"
+                }
+            };
+
+            return await _coderAgent.RunAsync(request, ct);
+        }
+        else
+        {
+            return await ExecuteGenerationCodingAsync(task, projectState, ct);
+        }
+    }
+
+    /// <summary>
+    /// Execute standard code generation (non-modification)
+    /// </summary>
+    private async Task<AgentResponse> ExecuteGenerationCodingAsync(
+        TaskDto task,
+        ProjectState projectState,
+        CancellationToken ct)
+    {
+        var request = new AgentRequest
+        {
+            Input = task.Description,
+            ProjectState = projectState,
+            Context = new Dictionary<string, string>
+            {
+                ["task_index"] = task.Index.ToString(),
+                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? "",
+                ["project_name"] = task.ProjectName ?? "default"
+            }
+        };
+
+        return await _coderAgent.RunAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Internal class for grouping tasks by project
+    /// </summary>
+    private class ProjectTaskGroup
+    {
+        public string ProjectName { get; set; } = string.Empty;
+        public int Order { get; set; }
+        public List<string> DependsOn { get; set; } = new();
+        public List<TaskDto> Tasks { get; set; } = new();
     }
 }

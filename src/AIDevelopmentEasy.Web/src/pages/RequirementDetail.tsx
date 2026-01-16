@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw } from 'lucide-react';
-import { RequirementDto, RequirementStatus, RequirementType, TaskStatus } from '../types';
+import { RequirementDto, RequirementStatus, TaskStatus } from '../types';
 import { requirementsApi, pipelineApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 
@@ -127,7 +127,7 @@ export function RequirementDetail() {
               <StatusBadge status={requirement.status} />
             </div>
             <p className="text-slate-400">
-              {requirement.type === RequirementType.Multi ? 'Multi-Project' : 'Single Project'} Requirement
+              {requirement.codebaseId ? 'With codebase context' : 'New project requirement'}
             </p>
           </div>
         </div>
@@ -204,9 +204,9 @@ export function RequirementDetail() {
                   <dd className="text-white font-mono">{requirement.id}</dd>
                 </div>
                 <div>
-                  <dt className="text-sm text-slate-400">Type</dt>
+                  <dt className="text-sm text-slate-400">Codebase</dt>
                   <dd className="text-white">
-                    {requirement.type === RequirementType.Multi ? 'Multi-Project' : 'Single Project'}
+                    {requirement.codebaseId || 'None (new project)'}
                   </dd>
                 </div>
                 <div>
@@ -263,49 +263,69 @@ export function RequirementDetail() {
             <h3 className="text-lg font-semibold text-white mb-4">
               Tasks ({requirement.tasks.length})
             </h3>
-            {requirement.tasks.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
-                No tasks yet. Start the pipeline to generate tasks.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {requirement.tasks.map((task, index) => (
-                  <div 
-                    key={index}
-                    className="p-4 bg-slate-900 rounded-lg border border-slate-700"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">{getTaskStatusIcon(task.status)}</span>
-                        <div>
-                          <div className="font-medium text-white">{task.title}</div>
-                          <div className="text-sm text-slate-400">
-                            {task.projectName && `Project: ${task.projectName}`}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-xs text-slate-500">#{task.index + 1}</span>
-                    </div>
-                    {task.description && (
-                      <p className="mt-2 text-sm text-slate-400">{task.description}</p>
-                    )}
-                    {task.targetFiles.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {task.targetFiles.map((file, i) => (
-                          <span 
-                            key={i}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-800 rounded text-xs text-slate-300"
-                          >
-                            <FileCode className="w-3 h-3" />
-                            {file}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                {requirement.tasks.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400">
+                    No tasks yet. Start the pipeline to generate tasks.
                   </div>
-                ))}
-              </div>
-            )}
+                ) : (
+                  <div className="space-y-3">
+                    {requirement.tasks.map((task, index) => (
+                      <div 
+                        key={index}
+                        className={`p-4 bg-slate-900 rounded-lg border ${
+                          task.isModification 
+                            ? 'border-amber-500/50' 
+                            : 'border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl">{getTaskStatusIcon(task.status)}</span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-white">{task.title}</span>
+                                {task.isModification && (
+                                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
+                                    Modify
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm text-slate-400">
+                                {task.projectName && `Project: ${task.projectName}`}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-xs text-slate-500">#{task.index + 1}</span>
+                        </div>
+                        {task.description && (
+                          <p className="mt-2 text-sm text-slate-400">{task.description}</p>
+                        )}
+                        {task.targetFiles.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {task.targetFiles.map((file, i) => (
+                              <span 
+                                key={i}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${
+                                  task.isModification
+                                    ? 'bg-amber-500/10 text-amber-300'
+                                    : 'bg-slate-800 text-slate-300'
+                                }`}
+                              >
+                                <FileCode className="w-3 h-3" />
+                                {file}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {task.usesExisting && task.usesExisting.length > 0 && (
+                          <div className="mt-2 text-xs text-slate-500">
+                            Uses: {task.usesExisting.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
           </div>
         )}
 

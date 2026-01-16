@@ -81,6 +81,7 @@ public class RequirementsController : ControllerBase
             request.Name,
             request.Content,
             request.Type,
+            request.CodebaseId,
             cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = requirement.Id }, requirement);
@@ -158,4 +159,5 @@ public class CreateRequirementRequest
     public string Name { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public RequirementType Type { get; set; } = RequirementType.Single;
+    public string? CodebaseId { get; set; }
 }

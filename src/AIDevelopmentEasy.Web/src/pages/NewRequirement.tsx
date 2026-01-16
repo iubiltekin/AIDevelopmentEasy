@@ -1,25 +1,33 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, FileJson, FileText, Save } from 'lucide-react';
-import { RequirementType, CreateRequirementRequest } from '../types';
-import { requirementsApi } from '../services/api';
+import { ArrowLeft, FileText, Save, Database } from 'lucide-react';
+import { RequirementType, CreateRequirementRequest, CodebaseDto, CodebaseStatus } from '../types';
+import { requirementsApi, codebasesApi } from '../services/api';
 
 export function NewRequirement() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
-  const [type, setType] = useState<RequirementType>(RequirementType.Single);
+  const [codebaseId, setCodebaseId] = useState<string>('');
+  const [codebases, setCodebases] = useState<CodebaseDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // Load available codebases
+    codebasesApi.getAll()
+      .then(data => setCodebases(data.filter(c => c.status === CodebaseStatus.Ready)))
+      .catch(console.error);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!name.trim()) {
       setError('Please enter a requirement name');
       return;
     }
-    
+
     if (!content.trim()) {
       setError('Please enter requirement content');
       return;
@@ -28,13 +36,14 @@ export function NewRequirement() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const request: CreateRequirementRequest = {
         name: name.trim(),
         content: content.trim(),
-        type
+        type: RequirementType.Single, // Always use Single type
+        codebaseId: codebaseId || undefined
       };
-      
+
       const created = await requirementsApi.create(request);
       navigate(`/requirements/${created.id}`);
     } catch (err) {
@@ -44,7 +53,7 @@ export function NewRequirement() {
     }
   };
 
-  const singleProjectTemplate = `# Feature Name
+  const requirementTemplate = `# Feature Name
 
 ## Description
 Brief description of the feature or functionality needed.
@@ -71,37 +80,8 @@ var result = service.DoSomething();
 - [ ] Unit tests included
 `;
 
-  const multiProjectTemplate = `{
-  "name": "Feature Name",
-  "description": "Brief description of the multi-project feature",
-  "projects": [
-    {
-      "name": "MyLibrary",
-      "type": "classlib",
-      "framework": "net8.0",
-      "requirements": [
-        "Core functionality",
-        "Public API"
-      ]
-    },
-    {
-      "name": "MyLibrary.Tests",
-      "type": "xunit",
-      "framework": "net8.0",
-      "requirements": [
-        "Unit tests for core functionality"
-      ],
-      "dependsOn": ["MyLibrary"]
-    }
-  ],
-  "sharedRequirements": [
-    "Follow SOLID principles",
-    "Include XML documentation"
-  ]
-}`;
-
   const applyTemplate = () => {
-    setContent(type === RequirementType.Multi ? multiProjectTemplate : singleProjectTemplate);
+    setContent(requirementTemplate);
   };
 
   return (
@@ -142,79 +122,51 @@ var result = service.DoSomething();
           />
         </div>
 
-        {/* Type */}
+        {/* Codebase Selection */}
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-2">
-            Requirement Type
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4" />
+              Target Codebase (Optional)
+            </div>
           </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              onClick={() => setType(RequirementType.Single)}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                type === RequirementType.Single
-                  ? 'border-blue-500 bg-blue-500/10'
-                  : 'border-slate-600 hover:border-slate-500'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${
-                  type === RequirementType.Single ? 'bg-blue-500/20' : 'bg-slate-700'
-                }`}>
-                  <FileText className={`w-5 h-5 ${
-                    type === RequirementType.Single ? 'text-blue-400' : 'text-slate-400'
-                  }`} />
-                </div>
-                <div className="text-left">
-                  <div className={`font-medium ${
-                    type === RequirementType.Single ? 'text-white' : 'text-slate-300'
-                  }`}>
-                    Single Project
-                  </div>
-                  <div className="text-sm text-slate-400">
-                    Markdown or text format
-                  </div>
-                </div>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setType(RequirementType.Multi)}
-              className={`p-4 rounded-xl border-2 transition-all ${
-                type === RequirementType.Multi
-                  ? 'border-purple-500 bg-purple-500/10'
-                  : 'border-slate-600 hover:border-slate-500'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${
-                  type === RequirementType.Multi ? 'bg-purple-500/20' : 'bg-slate-700'
-                }`}>
-                  <FileJson className={`w-5 h-5 ${
-                    type === RequirementType.Multi ? 'text-purple-400' : 'text-slate-400'
-                  }`} />
-                </div>
-                <div className="text-left">
-                  <div className={`font-medium ${
-                    type === RequirementType.Multi ? 'text-white' : 'text-slate-300'
-                  }`}>
-                    Multi-Project
-                  </div>
-                  <div className="text-sm text-slate-400">
-                    JSON format with projects
-                  </div>
-                </div>
-              </div>
-            </button>
-          </div>
+          <select
+            value={codebaseId}
+            onChange={e => setCodebaseId(e.target.value)}
+            className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="">No codebase (new project)</option>
+            {codebases.map(cb => (
+              <option key={cb.id} value={cb.id}>
+                {cb.name} - {cb.summary?.totalProjects || 0} projects, {cb.summary?.primaryFramework || 'Unknown'}
+              </option>
+            ))}
+          </select>
+          {codebaseId ? (
+            <div className="mt-2 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+              <p className="text-xs text-blue-300 font-medium mb-2">🔍 Codebase-Aware Pipeline Enabled:</p>
+              <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
+                <li><span className="text-blue-300">Analysis</span> → CodeAnalysisAgent finds classes &amp; references</li>
+                <li><span className="text-blue-300">Planning</span> → PlannerAgent creates tasks for existing files</li>
+                <li><span className="text-blue-300">Coding</span> → CoderAgent modifies existing code</li>
+                <li><span className="text-blue-300">Debugging</span> → DebuggerAgent verifies changes</li>
+                <li><span className="text-blue-300">Reviewing</span> → ReviewerAgent checks quality</li>
+              </ol>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-slate-500">
+              Select a codebase to enable modification mode. Without a codebase, the pipeline will
+              generate new standalone code.
+            </p>
+          )}
         </div>
 
         {/* Content */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-sm font-medium text-slate-300">
-              Content
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-300">
+              <FileText className="w-4 h-4" />
+              Requirement Content
             </label>
             <button
               type="button"
@@ -228,10 +180,13 @@ var result = service.DoSomething();
             value={content}
             onChange={e => setContent(e.target.value)}
             rows={20}
-            placeholder={type === RequirementType.Multi 
-              ? 'Enter JSON with project definitions...'
-              : 'Enter your requirement in Markdown format...'
-            }
+            placeholder="Enter your requirement in Markdown format...
+
+Describe:
+- What you want to build
+- Key features and functionality
+- Technical constraints
+- Expected behavior"
             className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white font-mono text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
           />
         </div>

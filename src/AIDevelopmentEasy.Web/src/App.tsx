@@ -5,6 +5,8 @@ import { RequirementDetail } from './pages/RequirementDetail';
 import { NewRequirement } from './pages/NewRequirement';
 import { PipelineView } from './pages/PipelineView';
 import { Settings } from './pages/Settings';
+import { Codebases } from './pages/Codebases';
+import { CodebaseDetail } from './pages/CodebaseDetail';
 
 function App() {
   return (
@@ -16,6 +18,8 @@ function App() {
           <Route path="requirements/new" element={<NewRequirement />} />
           <Route path="requirements/:id" element={<RequirementDetail />} />
           <Route path="pipeline/:id" element={<PipelineView />} />
+          <Route path="codebases" element={<Codebases />} />
+          <Route path="codebases/:id" element={<CodebaseDetail />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

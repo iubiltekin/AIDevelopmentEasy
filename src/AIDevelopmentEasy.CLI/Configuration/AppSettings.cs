@@ -37,34 +37,43 @@ public class AIDevelopmentEasySettings
 }
 
 /// <summary>
-/// Resolved paths based on solution directory
+/// Resolved paths based on ProgramData directory for persistent storage
 /// </summary>
 public class ResolvedPaths
 {
-    public string SolutionDirectory { get; }
+    public string AppDataDirectory { get; }
     public string RequirementsPath { get; }
     public string OutputPath { get; }
     public string LogsPath { get; }
     public string PromptsPath { get; }
+    public string CodebasesPath { get; }
     public string CodingStandardsPath { get; }
     public string? CodingStandards { get; private set; }
 
     public ResolvedPaths(AIDevelopmentEasySettings settings)
     {
-        SolutionDirectory = FindSolutionDirectory();
+        // Use ProgramData for all data directories (persistent storage)
+        var programDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        AppDataDirectory = Path.Combine(programDataDir, "AIDevelopmentEasy");
 
-        RequirementsPath = ResolvePath(settings.RequirementsDirectory, SolutionDirectory);
-        OutputPath = ResolvePath(settings.OutputDirectory, SolutionDirectory);
-        LogsPath = Path.Combine(SolutionDirectory, "logs");
-        PromptsPath = Path.Combine(SolutionDirectory, "prompts");
+        RequirementsPath = Path.Combine(AppDataDirectory, "requirements");
+        OutputPath = Path.Combine(AppDataDirectory, "output");
+        LogsPath = Path.Combine(AppDataDirectory, "logs");
+        PromptsPath = Path.Combine(AppDataDirectory, "prompts");
+        CodebasesPath = Path.Combine(AppDataDirectory, "codebases");
         CodingStandardsPath = ResolvePath(settings.CodingStandardsFile, AppContext.BaseDirectory);
 
         // Ensure directories exist
+        Directory.CreateDirectory(AppDataDirectory);
         Directory.CreateDirectory(RequirementsPath);
         Directory.CreateDirectory(OutputPath);
         Directory.CreateDirectory(LogsPath);
         Directory.CreateDirectory(PromptsPath);
-        
+        Directory.CreateDirectory(CodebasesPath);
+
+        // Copy default prompts from app directory if prompts directory is empty
+        CopyDefaultPromptsIfNeeded();
+
         // Initialize PromptLoader with correct prompts directory
         PromptLoader.Initialize(PromptsPath);
     }
@@ -77,20 +86,24 @@ public class ResolvedPaths
         }
     }
 
+    private void CopyDefaultPromptsIfNeeded()
+    {
+        var appPromptsDir = Path.Combine(AppContext.BaseDirectory, "prompts");
+        if (Directory.Exists(appPromptsDir) && !Directory.EnumerateFiles(PromptsPath, "*.md").Any())
+        {
+            foreach (var file in Directory.GetFiles(appPromptsDir, "*.md"))
+            {
+                var destFile = Path.Combine(PromptsPath, Path.GetFileName(file));
+                if (!File.Exists(destFile))
+                {
+                    File.Copy(file, destFile);
+                }
+            }
+        }
+    }
+
     private static string ResolvePath(string path, string basePath)
     {
         return Path.IsPathRooted(path) ? path : Path.Combine(basePath, path);
-    }
-
-    private static string FindSolutionDirectory()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (dir.GetFiles("*.sln").Length > 0)
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-        return AppContext.BaseDirectory;
     }
 }

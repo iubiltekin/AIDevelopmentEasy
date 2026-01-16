@@ -1,8 +1,0 @@
-﻿{
-  "index": 2,
-  "title": "Implement LogRotator class",
-  "description": "Core implementation of log file rotation with GZip compression support",
-  "projectName": "LogRotationHelper",
-  "targetFiles": ["LogRotator.cs"],
-  "status": 2
-}
