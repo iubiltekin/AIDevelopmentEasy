@@ -1,0 +1,22 @@
+bin/
+obj/
+*.user
+*.suo
+*.sln.docstates
+.vs/
+*.json.bak
+sprint_plan_*.json
+
+# Local settings with secrets (DO NOT COMMIT)
+appsettings.Local.json
+appsettings.*.Local.json
+
+# Runtime directories (created at solution root)
+/output/
+/logs/
+
+# Processed requirements (keep .json/.md examples, ignore processing artifacts)
+requirements/*/_approved.json
+requirements/*/_completed.json
+requirements/*/_status.json
+requirements/*/projects/

@@ -1,0 +1,63 @@
+{
+  "framework": {
+    "name": ".NET Framework",
+    "version": "4.6.2",
+    "langVersion": "latest"
+  },
+  "coding": {
+    "language": "csharp",
+    "namingConventions": {
+      "classes": "PascalCase",
+      "interfaces": "IPascalCase",
+      "methods": "PascalCase",
+      "properties": "PascalCase",
+      "privateFields": "_camelCase",
+      "parameters": "camelCase",
+      "constants": "PascalCase"
+    },
+    "fileStructure": "OneClassPerFile",
+    "xmlDocumentation": true,
+    "nullHandling": "ExplicitNullChecks",
+    "asyncPattern": "TaskBased"
+  },
+  "testing": {
+    "framework": "NUnit",
+    "assertionLibrary": "FluentAssertions",
+    "style": "TestCase",
+    "conventions": {
+      "testClassSuffix": "Tests",
+      "testMethodNaming": "MethodName_Scenario_ExpectedResult",
+      "arrangeActAssert": true
+    },
+    "examples": {
+      "basicTest": "[Test]\npublic void RotateIfNeeded_WhenFileSizeExceedsLimit_ShouldRotate()\n{\n    // Arrange\n    var rotator = new LogRotator(testPath, maxSize: 1000);\n    \n    // Act\n    rotator.RotateIfNeeded();\n    \n    // Assert\n    rotator.BackupCount.Should().Be(1);\n}",
+      "testCase": "[TestCase(100, false)]\n[TestCase(1000, true)]\n[TestCase(5000, true)]\npublic void RotateIfNeeded_WithVariousSizes_ShouldRotateCorrectly(int fileSize, bool shouldRotate)\n{\n    // Arrange & Act & Assert\n    ...\n}",
+      "fluentAssertions": "result.Should().NotBeNull();\nresult.Should().BeOfType<LogRotator>();\nlist.Should().HaveCount(3);\naction.Should().Throw<ArgumentNullException>();"
+    }
+  },
+  "libraries": {
+    "json": "Newtonsoft.Json",
+    "logging": "NLog or log4net",
+    "http": "System.Net.Http.HttpClient",
+    "di": "Manual or Ninject"
+  },
+  "patterns": {
+    "disposable": "ImplementIDisposableForUnmanagedResources",
+    "exceptions": "CustomExceptionsForDomainErrors",
+    "nullObject": "UseNullObjectPatternWhereAppropriate"
+  },
+  "prohibited": [
+    "System.Text.Json (use Newtonsoft.Json)",
+    "HttpClientFactory (not available in 4.6.2)",
+    "C# 8+ nullable reference types",
+    "Records (C# 9+)",
+    "Top-level statements",
+    "MSTest framework"
+  ],
+  "required": [
+    "XML documentation on public members",
+    "Explicit null checks with ArgumentNullException",
+    "Using statements for IDisposable",
+    "Async/await for I/O operations"
+  ]
+}
