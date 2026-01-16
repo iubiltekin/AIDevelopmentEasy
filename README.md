@@ -1,19 +1,19 @@
 # AIDevelopmentEasy
 
-Cooperative Multi-Agent Software Development Framework - LLM destekli agent'lar kullanarak yazılım geliştirme görevlerini otomatikleştiren bir C#/.NET uygulaması.
+Cooperative Multi-Agent Software Development Framework - A C#/.NET application that automates software development tasks using LLM-powered agents.
 
-Referans: **"AgentMesh: A Cooperative Multi-Agent Generative AI Framework for Software Development Automation"** - [arXiv:2507.19902](https://arxiv.org/pdf/2507.19902)
+Reference: **"AgentMesh: A Cooperative Multi-Agent Generative AI Framework for Software Development Automation"** - [arXiv:2507.19902](https://arxiv.org/pdf/2507.19902)
 
-## 🚀 Hızlı Başlangıç
+## 🚀 Quick Start
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourusername/AIDevelopmentEasy.git
+git clone https://github.com/iubiltekin/AIDevelopmentEasy.git
 cd AIDevelopmentEasy
 
-# 2. API Key Konfigürasyonu
+# 2. API Key Configuration
 cp src/AIDevelopmentEasy.CLI/appsettings.json src/AIDevelopmentEasy.CLI/appsettings.Local.json
-# appsettings.Local.json dosyasını düzenleyip Azure OpenAI bilgilerinizi girin
+# Edit appsettings.Local.json and enter your Azure OpenAI credentials
 
 # 3. Build & Run
 dotnet restore
@@ -21,19 +21,19 @@ dotnet build
 dotnet run --project src/AIDevelopmentEasy.CLI
 ```
 
-## Teknolojiler
+## Technologies
 
-| Teknoloji | Kullanım Amacı |
-|-----------|----------------|
+| Technology | Purpose |
+|------------|---------|
 | **.NET 8** | AIDevelopmentEasy runtime |
-| **Azure OpenAI (GPT-4o)** | LLM API - kod üretimi ve analizi |
-| **MSBuild** | Üretilen C# kodunun derlenmesi |
-| **Microsoft.Extensions.DependencyInjection** | SOLID uyumlu DI container |
-| **Serilog** | Yapılandırılmış loglama |
+| **Azure OpenAI (GPT-4o)** | LLM API - code generation and analysis |
+| **MSBuild** | Compilation of generated C# code |
+| **Microsoft.Extensions.DependencyInjection** | SOLID-compliant DI container |
+| **Serilog** | Structured logging |
 
-## Mimari
+## Architecture
 
-### İnteraktif Pipeline Akışı
+### Interactive Pipeline Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -53,37 +53,37 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 │                              ▼                                               │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │  PHASE 1: PLANNING                                                    │  │
-│   │  ├─ Requirement analizi                                               │  │
-│   │  ├─ Task oluşturma                                                    │  │
-│   │  └─ ❓ Onay: "Approve plan?" [Y/n]                                    │  │
+│   │  ├─ Requirement analysis                                              │  │
+│   │  ├─ Task generation                                                   │  │
+│   │  └─ ❓ Approval: "Approve plan?" [Y/n]                                │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                              │                                               │
 │                              ▼                                               │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │  PHASE 2: CODE GENERATION                                             │  │
-│   │  ├─ ❓ Onay: "Start coding?" [Y/n]                                    │  │
-│   │  └─ Her dosya için kod üretimi                                        │  │
+│   │  ├─ ❓ Approval: "Start coding?" [Y/n]                                │  │
+│   │  └─ Code generation for each file                                     │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                              │                                               │
 │                              ▼                                               │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │  PHASE 3: COMPILATION CHECK                                           │  │
-│   │  ├─ ❓ Onay: "Run debugger?" [Y/n]                                    │  │
-│   │  └─ MSBuild + hata düzeltme                                           │  │
+│   │  ├─ ❓ Approval: "Run debugger?" [Y/n]                                │  │
+│   │  └─ MSBuild + error fixing                                            │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                              │                                               │
 │                              ▼                                               │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │  PHASE 4: UNIT TESTING                                                │  │
-│   │  ├─ ❓ Onay: "Run tests?" [Y/n]                                       │  │
-│   │  └─ Test sonuçları                                                    │  │
+│   │  ├─ ❓ Approval: "Run tests?" [Y/n]                                   │  │
+│   │  └─ Test results                                                      │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                              │                                               │
 │                              ▼                                               │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │  PHASE 5: CODE REVIEW                                                 │  │
-│   │  ├─ ❓ Onay: "Run review?" [Y/n]                                      │  │
-│   │  └─ Kalite raporu                                                     │  │
+│   │  ├─ ❓ Approval: "Run review?" [Y/n]                                  │  │
+│   │  └─ Quality report                                                    │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                              │                                               │
 │                              ▼                                               │
@@ -95,51 +95,51 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-> 📖 **Detaylı akış kılavuzu:** [INTERACTIVE-WORKFLOW.md](./INTERACTIVE-WORKFLOW.md)
+> 📖 **Detailed workflow guide:** [INTERACTIVE-WORKFLOW.md](./INTERACTIVE-WORKFLOW.md)
 
-## Agent'lar
+## Agents
 
-| Agent | Rol | Sorumluluk |
-|-------|-----|------------|
-| **PlannerAgent** | Yazılım Proje Planlayıcı | Requirement'ı analiz eder, task'lara böler |
-| **MultiProjectPlannerAgent** | Çoklu Proje Planlayıcı | Multi-project requirement'lar için phase-based planning |
-| **CoderAgent** | Senior Developer | Her dosya için kod üretir (coding standards'a uygun) |
-| **DebuggerAgent** | Debug Uzmanı | MSBuild ile derler, hataları düzeltir |
-| **ReviewerAgent** | Senior Code Reviewer | Son kalite kontrolü, onay verir |
+| Agent | Role | Responsibility |
+|-------|------|----------------|
+| **PlannerAgent** | Software Project Planner | Analyzes requirements, breaks down into tasks |
+| **MultiProjectPlannerAgent** | Multi-Project Planner | Phase-based planning for multi-project requirements |
+| **CoderAgent** | Senior Developer | Generates code for each file (following coding standards) |
+| **DebuggerAgent** | Debug Specialist | Compiles with MSBuild, fixes errors |
+| **ReviewerAgent** | Senior Code Reviewer | Final quality control, provides approval |
 
-## Özellikler
+## Features
 
-### 🎯 İnteraktif Akış
-- **Durum Takibi**: ⬜ Not Started → 📋 Planned → ✅ Approved → 🔄 In Progress → ✔️ Completed
-- **Adım Adım Onay**: Her fazda kullanıcı onayı gerekir
-- **Tekrar İşleme Yok**: Tamamlanan requirement'lar otomatik atlanır
-- **Menü Sistemi**: Kolay seçim ve navigasyon
+### 🎯 Interactive Flow
+- **Status Tracking**: ⬜ Not Started → 📋 Planned → ✅ Approved → 🔄 In Progress → ✔️ Completed
+- **Step-by-Step Approval**: User approval required at each phase
+- **No Reprocessing**: Completed requirements are automatically skipped
+- **Menu System**: Easy selection and navigation
 
-### 🏗️ SOLID Uyumlu Mimari
-- **Single Responsibility**: Her servis tek bir iş yapıyor
-- **Open/Closed**: Yeni processor'lar kolayca eklenebilir
-- **Dependency Inversion**: Tüm bağımlılıklar DI container üzerinden
-- **Interface Segregation**: Küçük, odaklı interface'ler
+### 🏗️ SOLID-Compliant Architecture
+- **Single Responsibility**: Each service does one thing
+- **Open/Closed**: New processors can be easily added
+- **Dependency Inversion**: All dependencies through DI container
+- **Interface Segregation**: Small, focused interfaces
 
-### 🤖 Multi-Agent Mimari
-- 5 uzmanlaşmış agent cooperative çalışır
-- Shared state (blackboard pattern) ile iletişim
-- Her agent kendi LLM prompt'una sahip
-- **Düzenlenebilir Prompt'lar** - `prompts/` dizininde Markdown formatında
+### 🤖 Multi-Agent Architecture
+- 5 specialized agents working cooperatively
+- Communication via shared state (blackboard pattern)
+- Each agent has its own LLM prompt
+- **Editable Prompts** - Markdown files in `prompts/` directory
 
 ### 📦 Multi-Project Support
-- Tek bir requirement ile birden fazla proje etkilenebilir
-- Her proje kendi test projesiyle birlikte geliştirilir
+- Single requirement can affect multiple projects
+- Each project developed with its own test project
 - Phase-based execution (core → consumer → integration)
 - Cross-project dependency management
 
-### 📝 Task Yönetimi
-- Single-project: `requirements/*.txt` veya `*.md`
+### 📝 Task Management
+- Single-project: `requirements/*.txt` or `*.md`
 - Multi-project: `requirements/*.json` (with affected_projects)
-- Otomatik task decomposition
-- **Düzenlenebilir task dosyaları** - onay öncesi edit/delete/add
+- Automatic task decomposition
+- **Editable task files** - edit/delete/add before approval
 
-### 📋 Coding Standards Entegrasyonu
+### 📋 Coding Standards Integration
 ```json
 {
   "framework": { "name": ".NET Framework", "version": "4.6.2" },
@@ -150,16 +150,16 @@ dotnet run --project src/AIDevelopmentEasy.CLI
 }
 ```
 
-## Konfigürasyon
+## Configuration
 
-### 🔒 API Key Güvenliği
+### 🔒 API Key Security
 
-API key'lerinizi korumak için iki dosya kullanılır:
+Two files are used to protect your API keys:
 
-| Dosya | Amaç | Git'e Gider? |
-|-------|------|--------------|
-| `appsettings.json` | Template (placeholder değerler) | ✅ Evet |
-| `appsettings.Local.json` | Gerçek API key'ler | ❌ Hayır |
+| File | Purpose | Committed to Git? |
+|------|---------|-------------------|
+| `appsettings.json` | Template (placeholder values) | ✅ Yes |
+| `appsettings.Local.json` | Actual API keys | ❌ No |
 
 ### appsettings.json (Template)
 ```json
@@ -180,7 +180,7 @@ API key'lerinizi korumak için iki dosya kullanılır:
 }
 ```
 
-### appsettings.Local.json (Gerçek Değerler)
+### appsettings.Local.json (Actual Values)
 ```json
 {
   "AzureOpenAI": {
@@ -192,13 +192,13 @@ API key'lerinizi korumak için iki dosya kullanılır:
 }
 ```
 
-> ⚠️ **Önemli**: `appsettings.Local.json` dosyası `.gitignore`'da tanımlıdır ve GitHub'a gitmez.
+> ⚠️ **Important**: `appsettings.Local.json` is defined in `.gitignore` and will not be pushed to GitHub.
 
-## Kullanım
+## Usage
 
 ### Single-Project Requirement
 
-1. Requirement dosyası oluştur:
+1. Create a requirement file:
 ```
 requirements/log-rotation.md
 ```
@@ -211,14 +211,14 @@ Requirements:
 - Thread-safe operations
 ```
 
-2. Çalıştır ve menüden seç:
+2. Run and select from menu:
 ```bash
 dotnet run --project src/AIDevelopmentEasy.CLI
 ```
 
 ### Multi-Project Requirement
 
-1. JSON requirement dosyası oluştur:
+1. Create a JSON requirement file:
 ```
 requirements/log-rotation.json
 ```
@@ -252,14 +252,14 @@ requirements/log-rotation.json
 }
 ```
 
-2. Çalıştır, menüden seç ve adımları takip et
+2. Run, select from menu, and follow the steps
 
-## Proje Yapısı
+## Project Structure
 
 ```
 AIDevelopmentEasy/
 ├── 📄 README.md
-├── 📄 INTERACTIVE-WORKFLOW.md          # Detaylı akış kılavuzu
+├── 📄 INTERACTIVE-WORKFLOW.md          # Detailed workflow guide
 ├── 📄 LICENSE
 │
 ├── 📁 src/
@@ -318,39 +318,39 @@ AIDevelopmentEasy/
     └── aideveasy-{date}.txt
 ```
 
-## Faydaları
+## Benefits
 
-| Fayda | Açıklama |
-|-------|----------|
-| **Hızlı Prototipleme** | Requirement → Working code in minutes |
-| **Tutarlı Kod Kalitesi** | Coding standards her zaman uygulanır |
-| **Test Coverage** | Her feature için otomatik unit testleri |
-| **Human-in-the-Loop** | Her adımda kullanıcı onayı |
-| **Multi-Project Support** | Tek requirement ile birden fazla proje |
-| **Tekrar İşleme Yok** | Tamamlanan işler atlanır |
-| **SOLID Mimari** | Bakımı kolay, genişletilebilir kod |
+| Benefit | Description |
+|---------|-------------|
+| **Rapid Prototyping** | Requirement → Working code in minutes |
+| **Consistent Code Quality** | Coding standards always enforced |
+| **Test Coverage** | Automatic unit tests for each feature |
+| **Human-in-the-Loop** | User approval at each step |
+| **Multi-Project Support** | Single requirement for multiple projects |
+| **No Reprocessing** | Completed work is skipped |
+| **SOLID Architecture** | Maintainable, extensible code |
 
-## Gelecek Geliştirmeler
+## Future Improvements
 
-- [ ] Jira entegrasyonu (requirement'ları Jira'dan çek)
-- [ ] Paralel agent execution
-- [ ] Vector database ile memory
+- [ ] Jira integration (fetch requirements from Jira)
+- [ ] Parallel agent execution
+- [ ] Vector database for memory
 - [ ] Git integration (auto-commit)
 - [ ] Existing codebase analysis
 - [ ] Web UI (Blazor/React)
 
-## Referanslar
+## References
 
-### Temel Referans
-- [AgentMesh Paper](https://arxiv.org/pdf/2507.19902) - Bu projenin dayandığı akademik makale
+### Primary Reference
+- [AgentMesh Paper](https://arxiv.org/pdf/2507.19902) - The academic paper this project is based on
 
-### Benzer Multi-Agent Framework'leri (Karşılaştırma için)
+### Similar Multi-Agent Frameworks (for comparison)
 - [ChatDev](https://github.com/OpenBMB/ChatDev) - Python, multi-agent software company simulation
 - [MetaGPT](https://github.com/geekan/MetaGPT) - Python, multi-agent meta programming
-- [AutoGen](https://github.com/microsoft/autogen) - Microsoft'un multi-agent conversation framework'ü
+- [AutoGen](https://github.com/microsoft/autogen) - Microsoft's multi-agent conversation framework
 
-> **Not**: Bu projeler doğrudan kullanılmamıştır, sadece benzer konseptler için referans olarak listelenmiştir.
+> **Note**: These projects were not directly used, listed only as references for similar concepts.
 
-## Lisans
+## License
 
 MIT

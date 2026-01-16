@@ -1,64 +1,64 @@
 # AI Agent Prompts
 
-Bu dizin, AIDevelopmentEasy agent'larının sistem prompt'larını içerir. Her prompt dosyası Markdown formatındadır ve agent'lar tarafından çalışma zamanında okunur.
+This directory contains the system prompts for AIDevelopmentEasy agents. Each prompt file is in Markdown format and is read by agents at runtime.
 
-## Prompt Dosyaları
+## Prompt Files
 
-| Dosya | Agent | Açıklama |
-|-------|-------|----------|
-| `planner.md` | PlannerAgent | Gereksinimleri analiz eder ve görev listesi oluşturur |
-| `multi-project-planner.md` | MultiProjectPlannerAgent | Çoklu proje gereksinimlerini planlar |
-| `coder-csharp.md` | CoderAgent (C#) | C# kodu üretir |
-| `coder-generic.md` | CoderAgent (Other) | Diğer diller için kod üretir |
-| `debugger-csharp.md` | DebuggerAgent (C#) | C# kodundaki hataları tespit eder ve düzeltir |
-| `debugger-generic.md` | DebuggerAgent (Other) | Diğer dillerdeki hataları düzeltir |
-| `reviewer.md` | ReviewerAgent | Kod kalitesini ve gereksinimlere uygunluğu değerlendirir |
+| File | Agent | Description |
+|------|-------|-------------|
+| `planner.md` | PlannerAgent | Analyzes requirements and creates task lists |
+| `multi-project-planner.md` | MultiProjectPlannerAgent | Plans multi-project requirements |
+| `coder-csharp.md` | CoderAgent (C#) | Generates C# code |
+| `coder-generic.md` | CoderAgent (Other) | Generates code for other languages |
+| `debugger-csharp.md` | DebuggerAgent (C#) | Detects and fixes errors in C# code |
+| `debugger-generic.md` | DebuggerAgent (Other) | Fixes errors in other languages |
+| `reviewer.md` | ReviewerAgent | Evaluates code quality and requirement compliance |
 
-## Prompt Düzenleme
+## Editing Prompts
 
-Prompt'ları düzenlemek için:
+To edit prompts:
 
-1. İlgili `.md` dosyasını açın
-2. İçeriği düzenleyin (Markdown formatında)
-3. Dosyayı kaydedin
+1. Open the relevant `.md` file
+2. Edit the content (in Markdown format)
+3. Save the file
 
-Değişiklikler **yeniden başlatma gerektirmeden** bir sonraki agent çağrısında otomatik olarak yüklenir.
+Changes are **automatically loaded** on the next agent call without requiring a restart.
 
-## Değişken Kullanımı
+## Variable Usage
 
-Bazı prompt dosyalarında `{{VARIABLE}}` formatında değişkenler kullanılabilir:
+Some prompt files support `{{VARIABLE}}` format variables:
 
-- `coder-generic.md`: `{{LANGUAGE}}` - Hedef programlama dili
+- `coder-generic.md`: `{{LANGUAGE}}` - Target programming language
 
-## Yapı
+## Structure
 
-Prompt dosyaları şu yapıyı takip eder:
+Prompt files follow this structure:
 
 ```markdown
-# Agent Adı System Prompt
+# Agent Name System Prompt
 
-Açıklama paragrafı...
+Description paragraph...
 
-## Sorumluluklar
+## Responsibilities
 
-1. Madde 1
-2. Madde 2
+1. Item 1
+2. Item 2
 
-## Kurallar
+## Rules
 
-- Kural 1
-- Kural 2
+- Rule 1
+- Rule 2
 
-## Çıktı Formatı
+## Output Format
 
-Beklenen çıktı formatı açıklaması...
+Expected output format description...
 
-**IMPORTANT**: Önemli notlar...
+**IMPORTANT**: Important notes...
 ```
 
-## Dikkat Edilecekler
+## Important Notes
 
-1. **JSON Çıktısı**: Planner ve Reviewer agent'ları JSON formatında çıktı bekler
-2. **Kod Çıktısı**: Coder ve Debugger agent'ları markdown code block içinde kod bekler
-3. **Dil Uyumluluğu**: .NET Framework 4.6.2 uyumluluğuna dikkat edin
-4. **Test Framework**: NUnit ve FluentAssertions kullanılır
+1. **JSON Output**: Planner and Reviewer agents expect JSON format output
+2. **Code Output**: Coder and Debugger agents expect code in markdown code blocks
+3. **Language Compatibility**: Pay attention to .NET Framework 4.6.2 compatibility
+4. **Test Framework**: NUnit and FluentAssertions are used

@@ -1,10 +1,10 @@
 # 🎯 Interactive Workflow Guide
 
-AIDevelopmentEasy artık interaktif bir akışa sahip. Kullanıcı her adımda kontrol sahibi ve requirement'lar tekrar tekrar işlenmez.
+AIDevelopmentEasy now features an interactive workflow. Users have control at each step and requirements are not processed repeatedly.
 
-## 📋 Requirements Menüsü
+## 📋 Requirements Menu
 
-Uygulama başlatıldığında interaktif bir menü görüntülenir:
+When the application starts, an interactive menu is displayed:
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -19,23 +19,23 @@ Uygulama başlatıldığında interaktif bir menü görüntülenir:
   [0] Exit  |  [R] Refresh  |  [number] Select requirement
 ```
 
-### Durum Göstergeleri
+### Status Indicators
 
-| Durum | Emoji | Açıklama |
-|-------|-------|----------|
-| Not Started | ⬜ | Henüz işlenmemiş |
-| Planned | 📋 | Task'lar oluşturuldu, onay bekliyor |
-| Approved | ✅ | Plan onaylandı, kodlamaya hazır |
-| In Progress | 🔄 | Şu an işleniyor |
-| Completed | ✔️ | Tamamlandı |
+| Status | Emoji | Description |
+|--------|-------|-------------|
+| Not Started | ⬜ | Not yet processed |
+| Planned | 📋 | Tasks created, waiting for approval |
+| Approved | ✅ | Plan approved, ready for coding |
+| In Progress | 🔄 | Currently processing |
+| Completed | ✔️ | Finished |
 
-> **💡 İpucu**: Tamamlanmış requirement'lar otomatik olarak listede gösterilir ama tekrar işlenmez. Tekrar işlemek için `_completed.json` dosyasını silin.
+> **💡 Tip**: Completed requirements are automatically shown in the list but won't be reprocessed. To reprocess, delete the `_completed.json` file.
 
 ---
 
-## 📌 Pipeline Adımları
+## 📌 Pipeline Steps
 
-Her requirement seçildiğinde aşağıdaki pipeline adım adım çalışır:
+When a requirement is selected, the following pipeline runs step by step:
 
 ### Phase 1: Planning 📝
 
@@ -62,11 +62,11 @@ Her requirement seçildiğinde aşağıdaki pipeline adım adım çalışır:
   Approve plan and continue to coding? [Y/n]: _
 ```
 
-**Bu aşamada yapabilecekleriniz:**
-- Task dosyalarını düzenleyebilirsiniz
-- Gereksiz task'ları silebilirsiniz
-- Yeni task'lar ekleyebilirsiniz
-- `n` ile işlemi iptal edebilirsiniz
+**What you can do at this stage:**
+- Edit task files
+- Delete unnecessary tasks
+- Add new tasks
+- Cancel with `n`
 
 ---
 
@@ -172,17 +172,17 @@ Her requirement seçildiğinde aşağıdaki pipeline adım adım çalışır:
 
 ---
 
-## 🔄 Akış Diyagramı
+## 🔄 Flow Diagram
 
 ```
                     ┌─────────────────┐
                     │  Requirements   │
-                    │     Menüsü      │
+                    │      Menu       │
                     └────────┬────────┘
                              │
                     ┌────────▼────────┐
-                    │  Seçim Yap      │
-                    │  [1-N] veya [0] │
+                    │  Make Selection │
+                    │  [1-N] or [0]   │
                     └────────┬────────┘
                              │
          ┌───────────────────┼───────────────────┐
@@ -190,103 +190,103 @@ Her requirement seçildiğinde aşağıdaki pipeline adım adım çalışır:
     [0] Exit           [1-N] Select         [R] Refresh
          │                   │                   │
          ▼                   ▼                   │
-       Çıkış          ┌──────────────┐          │
-                      │   PHASE 1    │          │
-                      │  Planning    │◄─────────┘
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │  Onay Al?    │──── [N] ──► Menüye Dön
-                      └──────┬───────┘
-                             │ [Y]
-                      ┌──────▼───────┐
-                      │   PHASE 2    │
-                      │   Coding     │
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │  Onay Al?    │──── [N] ──► Kaydet & Menü
-                      └──────┬───────┘
-                             │ [Y]
-                      ┌──────▼───────┐
-                      │   PHASE 3    │
-                      │   Debug      │
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │  Onay Al?    │──── [N] ──► Kaydet & Menü
-                      └──────┬───────┘
-                             │ [Y]
-                      ┌──────▼───────┐
-                      │   PHASE 4    │
-                      │   Testing    │
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │  Onay Al?    │──── [N] ──► Kaydet & Menü
-                      └──────┬───────┘
-                             │ [Y]
-                      ┌──────▼───────┐
-                      │   PHASE 5    │
-                      │   Review     │
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │   Kaydet &   │
-                      │   Tamamla    │
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │   Menüye     │
-                      │    Dön       │
-                      └──────────────┘
+       Exit            ┌──────────────┐          │
+                       │   PHASE 1    │          │
+                       │  Planning    │◄─────────┘
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │  Approve?    │──── [N] ──► Return to Menu
+                       └──────┬───────┘
+                              │ [Y]
+                       ┌──────▼───────┐
+                       │   PHASE 2    │
+                       │   Coding     │
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │  Approve?    │──── [N] ──► Save & Menu
+                       └──────┬───────┘
+                              │ [Y]
+                       ┌──────▼───────┐
+                       │   PHASE 3    │
+                       │   Debug      │
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │  Approve?    │──── [N] ──► Save & Menu
+                       └──────┬───────┘
+                              │ [Y]
+                       ┌──────▼───────┐
+                       │   PHASE 4    │
+                       │   Testing    │
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │  Approve?    │──── [N] ──► Save & Menu
+                       └──────┬───────┘
+                              │ [Y]
+                       ┌──────▼───────┐
+                       │   PHASE 5    │
+                       │   Review     │
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │   Save &     │
+                       │   Complete   │
+                       └──────┬───────┘
+                              │
+                       ┌──────▼───────┐
+                       │  Return to   │
+                       │    Menu      │
+                       └──────────────┘
 ```
 
 ---
 
-## 📂 Durum Dosyaları
+## 📂 Status Files
 
-Her requirement için aşağıdaki dosyalar oluşturulur:
+The following files are created for each requirement:
 
 ```
 requirements/
 └── log-rotation-helper/
-    ├── tasks/                    # Oluşturulan task'lar
+    ├── tasks/                    # Generated tasks
     │   ├── task-01.json
     │   ├── task-02.json
     │   └── task-03.json
-    ├── _approved.json            # Plan onaylandığında oluşur
-    └── _completed.json           # İşlem tamamlandığında oluşur
+    ├── _approved.json            # Created when plan is approved
+    └── _completed.json           # Created when processing is complete
 ```
 
-### Durumu Sıfırlama
+### Resetting Status
 
-| Eylem | Dosya İşlemi |
-|-------|--------------|
-| Planı yeniden oluştur | `tasks/` klasörünü sil |
-| Onayı geri al | `_approved.json` dosyasını sil |
-| Tamamlanmışı geri al | `_completed.json` dosyasını sil |
-
----
-
-## ⌨️ Kısayollar
-
-| Tuş | Eylem |
-|-----|-------|
-| `0` | Çıkış |
-| `R` | Listeyi yenile |
-| `1-N` | Requirement seç |
-| `Y` / `Enter` | Onayla (varsayılan) |
-| `N` | Reddet / Atla |
+| Action | File Operation |
+|--------|----------------|
+| Regenerate plan | Delete `tasks/` folder |
+| Revoke approval | Delete `_approved.json` file |
+| Reset completion | Delete `_completed.json` file |
 
 ---
 
-## 💡 İpuçları
+## ⌨️ Keyboard Shortcuts
 
-1. **Task Düzenleme**: Plan onayından önce `task-XX.json` dosyalarını manuel olarak düzenleyebilirsiniz.
+| Key | Action |
+|-----|--------|
+| `0` | Exit |
+| `R` | Refresh list |
+| `1-N` | Select requirement |
+| `Y` / `Enter` | Approve (default) |
+| `N` | Reject / Skip |
 
-2. **Kısmi İşlem**: Herhangi bir adımda `N` ile çıkarsanız, o ana kadar yapılan iş kaydedilir.
+---
 
-3. **Tekrar Başlama**: Bir requirement'ı baştan işlemek için ilgili klasördeki `_approved.json` ve `_completed.json` dosyalarını silin.
+## 💡 Tips
 
-4. **Multi-Project**: JSON formatındaki requirement'lar otomatik olarak multi-project olarak işlenir.
+1. **Task Editing**: You can manually edit `task-XX.json` files before plan approval.
+
+2. **Partial Processing**: If you exit with `N` at any step, work done up to that point is saved.
+
+3. **Starting Over**: To reprocess a requirement from scratch, delete the `_approved.json` and `_completed.json` files in the relevant folder.
+
+4. **Multi-Project**: Requirements in JSON format are automatically processed as multi-project.
