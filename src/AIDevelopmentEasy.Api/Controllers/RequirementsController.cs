@@ -67,6 +67,40 @@ public class RequirementsController : ControllerBase
     }
 
     /// <summary>
+    /// Update requirement content (only allowed when status is NotStarted/Draft)
+    /// </summary>
+    [HttpPut("{id}/content")]
+    public async Task<ActionResult> UpdateContent(string id, [FromBody] UpdateContentRequest request, CancellationToken cancellationToken)
+    {
+        var requirement = await _requirementRepository.GetByIdAsync(id, cancellationToken);
+        
+        if (requirement == null)
+            return NotFound();
+
+        // Only allow editing if not started (Draft state)
+        if (requirement.Status != RequirementStatus.NotStarted)
+        {
+            return BadRequest(new { 
+                error = "Cannot edit content", 
+                message = "Requirement must be reset before editing. Current status: " + requirement.Status 
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Content))
+        {
+            return BadRequest(new { error = "Content cannot be empty" });
+        }
+
+        var updated = await _requirementRepository.UpdateContentAsync(id, request.Content, cancellationToken);
+        
+        if (!updated)
+            return NotFound();
+
+        _logger.LogInformation("Updated content for requirement: {Id}", id);
+        return Ok(new { message = "Content updated successfully" });
+    }
+
+    /// <summary>
     /// Create a new requirement
     /// </summary>
     [HttpPost]
@@ -159,4 +193,9 @@ public class CreateRequirementRequest
     public string Content { get; set; } = string.Empty;
     public RequirementType Type { get; set; } = RequirementType.Single;
     public string? CodebaseId { get; set; }
+}
+
+public class UpdateContentRequest
+{
+    public string Content { get; set; } = string.Empty;
 }

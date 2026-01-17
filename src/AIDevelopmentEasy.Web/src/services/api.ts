@@ -64,6 +64,15 @@ export const requirementsApi = {
       { method: 'POST' }
     );
     await handleResponse<void>(response);
+  },
+
+  updateContent: async (id: string, content: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/content`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+    await handleResponse<void>(response);
   }
 };
 

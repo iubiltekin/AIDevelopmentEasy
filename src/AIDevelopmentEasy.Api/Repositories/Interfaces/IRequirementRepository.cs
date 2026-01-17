@@ -34,6 +34,11 @@ public interface IRequirementRepository
     Task UpdateStatusAsync(string id, RequirementStatus status, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update requirement content (only allowed when status is NotStarted/Draft)
+    /// </summary>
+    Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Delete a requirement
     /// </summary>
     Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default);

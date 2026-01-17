@@ -215,6 +215,17 @@ public class FileSystemRequirementRepository : IRequirementRepository
         return Task.CompletedTask;
     }
 
+    public async Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default)
+    {
+        var filePath = FindRequirementFile(id);
+        if (filePath == null)
+            return false;
+
+        await File.WriteAllTextAsync(filePath, content, cancellationToken);
+        _logger.LogInformation("Updated requirement content: {Id}", id);
+        return true;
+    }
+
     public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
         var filePath = FindRequirementFile(id);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X } from 'lucide-react';
+import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save } from 'lucide-react';
 import { RequirementDto, RequirementStatus, TaskStatus, PipelineStatusDto } from '../types';
 import { requirementsApi, pipelineApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
@@ -11,6 +11,9 @@ export function RequirementDetail() {
   const navigate = useNavigate();
   const [requirement, setRequirement] = useState<RequirementDto | null>(null);
   const [content, setContent] = useState<string>('');
+  const [editedContent, setEditedContent] = useState<string>('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [output, setOutput] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +101,40 @@ export function RequirementDetail() {
       setHistoryLoading(false);
     }
   };
+
+  const handleEditContent = () => {
+    setEditedContent(content);
+    setIsEditing(true);
+    setError(null);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditedContent('');
+    setError(null);
+  };
+
+  const handleSaveContent = async () => {
+    if (!id || !editedContent.trim()) {
+      setError('Content cannot be empty');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await requirementsApi.updateContent(id, editedContent);
+      setContent(editedContent);
+      setIsEditing(false);
+      setEditedContent('');
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save content');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const canEditContent = requirement?.status === RequirementStatus.NotStarted;
 
   const getTaskStatusIcon = (status: TaskStatus) => {
     switch (status) {
@@ -279,10 +316,61 @@ export function RequirementDetail() {
 
         {activeTab === 'content' && (
           <div>
-            <h3 className="text-lg font-semibold text-white mb-4">Requirement Content</h3>
-            <pre className="bg-slate-900 p-4 rounded-lg overflow-x-auto text-slate-300 whitespace-pre-wrap">
-              {content || 'No content available'}
-            </pre>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Requirement Content</h3>
+              {!isEditing && canEditContent && (
+                <button
+                  onClick={handleEditContent}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+                >
+                  <Edit2 className="w-4 h-4" />
+                  Edit
+                </button>
+              )}
+              {!isEditing && !canEditContent && requirement && (
+                <div className="text-sm text-slate-500 flex items-center gap-2">
+                  <span className="px-2 py-1 bg-amber-500/10 text-amber-400 rounded text-xs">
+                    Reset required to edit
+                  </span>
+                </div>
+              )}
+            </div>
+            
+            {isEditing ? (
+              <div className="space-y-4">
+                <textarea
+                  value={editedContent}
+                  onChange={(e) => setEditedContent(e.target.value)}
+                  className="w-full h-96 bg-slate-900 p-4 rounded-lg text-slate-300 font-mono text-sm border border-slate-600 focus:border-blue-500 focus:outline-none resize-y"
+                  placeholder="Enter requirement content..."
+                />
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    onClick={handleCancelEdit}
+                    disabled={isSaving}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveContent}
+                    disabled={isSaving || !editedContent.trim()}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {isSaving ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <pre className="bg-slate-900 p-4 rounded-lg overflow-x-auto text-slate-300 whitespace-pre-wrap">
+                {content || 'No content available'}
+              </pre>
+            )}
           </div>
         )}
 
