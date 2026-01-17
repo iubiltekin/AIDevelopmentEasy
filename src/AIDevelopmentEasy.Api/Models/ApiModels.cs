@@ -66,6 +66,16 @@ public class PipelineStatusDto
     public List<PhaseStatusDto> Phases { get; set; } = new();
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    
+    /// <summary>
+    /// Retry information when a phase needs to be retried
+    /// </summary>
+    public RetryInfoDto? RetryInfo { get; set; }
+    
+    /// <summary>
+    /// Target phase to return to after retry approval
+    /// </summary>
+    public PipelinePhase? RetryTargetPhase { get; set; }
 }
 
 /// <summary>
@@ -201,12 +211,14 @@ public enum TaskStatus
 public enum PipelinePhase
 {
     None,
-    Analysis,    // CodeAnalysisAgent - Codebase analysis (optional)
-    Planning,    // PlannerAgent - Task decomposition
-    Coding,      // CoderAgent - Code generation/modification
-    Debugging,   // DebuggerAgent - Testing and fixing
-    Reviewing,   // ReviewerAgent - Quality review
-    Deployment,  // DeploymentAgent - Deploy to codebase and build
+    Analysis,           // CodeAnalysisAgent - Codebase analysis (optional)
+    Planning,           // PlannerAgent - Task decomposition
+    Coding,             // CoderAgent - Code generation/modification
+    Debugging,          // DebuggerAgent - Testing and fixing
+    Reviewing,          // ReviewerAgent - Quality review
+    Deployment,         // DeploymentAgent - Deploy to codebase and build
+    UnitTesting, // Run new/modified tests in deployed codebase
+    PullRequest,        // Create GitHub PR (after tests pass)
     Completed
 }
 
@@ -217,5 +229,113 @@ public enum PhaseState
     Running,
     Completed,
     Failed,
-    Skipped
+    Skipped,
+    WaitingRetryApproval  // Waiting for user to approve auto-fix retry
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Retry and Fix Task DTOs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// A fix task generated from build/test failures
+/// </summary>
+public class FixTaskDto
+{
+    public int Index { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string TargetFile { get; set; } = string.Empty;
+    public FixTaskType Type { get; set; }
+    public string ErrorMessage { get; set; } = string.Empty;
+    public string? ErrorLocation { get; set; }
+    public string? StackTrace { get; set; }
+    public string? SuggestedFix { get; set; }
+}
+
+/// <summary>
+/// Type of fix task
+/// </summary>
+public enum FixTaskType
+{
+    BuildError,       // Compilation error
+    TestFailure,      // Unit test failure
+    IntegrationError  // Integration/dependency issue
+}
+
+/// <summary>
+/// Test execution result for a single test
+/// </summary>
+public class TestResultDto
+{
+    public string TestName { get; set; } = string.Empty;
+    public string ClassName { get; set; } = string.Empty;
+    public string? FilePath { get; set; }
+    public bool Passed { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? StackTrace { get; set; }
+    public TimeSpan Duration { get; set; }
+    public bool IsNewTest { get; set; }  // true = newly added test
+}
+
+/// <summary>
+/// Summary of test execution
+/// </summary>
+public class TestSummaryDto
+{
+    public int TotalTests { get; set; }
+    public int Passed { get; set; }
+    public int Failed { get; set; }
+    public int Skipped { get; set; }
+    public int NewTestsPassed { get; set; }
+    public int NewTestsFailed { get; set; }
+    public int ExistingTestsFailed { get; set; }  // CRITICAL: Breaking changes!
+    public TimeSpan TotalDuration { get; set; }
+    public bool IsBreakingChange => ExistingTestsFailed > 0;
+    public List<TestResultDto> FailedTests { get; set; } = new();
+}
+
+/// <summary>
+/// Retry context information
+/// </summary>
+public class RetryInfoDto
+{
+    public int CurrentAttempt { get; set; }
+    public int MaxAttempts { get; set; }
+    public RetryReason Reason { get; set; }
+    public List<FixTaskDto> FixTasks { get; set; } = new();
+    public string? LastError { get; set; }
+    public TestSummaryDto? TestSummary { get; set; }
+    public DateTime? LastAttemptAt { get; set; }
+}
+
+/// <summary>
+/// Reason for retry
+/// </summary>
+public enum RetryReason
+{
+    BuildFailed,
+    TestsFailed,
+    IntegrationFailed
+}
+
+/// <summary>
+/// Request to approve retry with fix tasks
+/// </summary>
+public class ApproveRetryRequest
+{
+    public bool Approved { get; set; } = true;
+    public RetryAction Action { get; set; } = RetryAction.AutoFix;
+    public string? Comment { get; set; }
+}
+
+/// <summary>
+/// Action to take on retry
+/// </summary>
+public enum RetryAction
+{
+    AutoFix,       // Let CoderAgent auto-fix
+    ManualFix,     // User will fix manually
+    SkipTests,     // Skip failed tests and continue
+    Abort          // Abort the pipeline
 }

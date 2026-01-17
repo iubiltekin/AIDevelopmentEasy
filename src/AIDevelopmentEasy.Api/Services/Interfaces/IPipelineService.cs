@@ -42,4 +42,14 @@ public interface IPipelineService
     /// Get all running pipelines
     /// </summary>
     Task<IEnumerable<string>> GetRunningPipelinesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approve retry with specified action (auto-fix, manual fix, skip, abort)
+    /// </summary>
+    Task<bool> ApproveRetryAsync(string requirementId, RetryAction action, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get current retry info if any
+    /// </summary>
+    Task<RetryInfoDto?> GetRetryInfoAsync(string requirementId, CancellationToken cancellationToken = default);
 }

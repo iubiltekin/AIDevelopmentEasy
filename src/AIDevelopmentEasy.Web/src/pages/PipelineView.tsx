@@ -4,7 +4,8 @@ import { ArrowLeft, RefreshCw, XCircle } from 'lucide-react';
 import { 
   PipelineStatusDto, 
   PipelinePhase, 
-  PipelineUpdateMessage 
+  PipelineUpdateMessage,
+  RetryAction
 } from '../types';
 import { pipelineApi, requirementsApi } from '../services/api';
 import { PipelineStatus } from '../components/PipelineStatus';
@@ -91,6 +92,37 @@ export function PipelineView() {
     }
   };
 
+  const handleApproveRetry = async (action: RetryAction) => {
+    if (!id) return;
+    
+    const actionLabels: Record<RetryAction, string> = {
+      [RetryAction.AutoFix]: 'Auto-fix and retry',
+      [RetryAction.ManualFix]: 'Request manual fix',
+      [RetryAction.SkipTests]: 'Skip failed tests',
+      [RetryAction.Abort]: 'Abort pipeline'
+    };
+
+    if (action === RetryAction.Abort) {
+      if (!confirm('Are you sure you want to abort the pipeline?')) return;
+    }
+
+    try {
+      await pipelineApi.approveRetry(id, action);
+      await loadStatus();
+      
+      // Add log entry
+      setLogs(prev => [...prev, {
+        requirementId: id,
+        updateType: 'RetryApproved',
+        phase: status?.currentPhase || PipelinePhase.None,
+        message: `Retry action selected: ${actionLabels[action]}`,
+        timestamp: new Date().toISOString()
+      }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve retry');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -152,6 +184,7 @@ export function PipelineView() {
             status={status}
             onApprove={handleApprove}
             onReject={handleReject}
+            onApproveRetry={handleApproveRetry}
           />
         </div>
       )}

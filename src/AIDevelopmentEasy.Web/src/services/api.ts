@@ -5,7 +5,9 @@ import type {
   PipelinePhase,
   CodebaseDto,
   CreateCodebaseRequest,
-  ProjectSummaryDto
+  ProjectSummaryDto,
+  RetryInfoDto,
+  RetryAction
 } from '../types';
 
 const API_BASE = '/api';
@@ -122,6 +124,21 @@ export const pipelineApi = {
   getReviewReport: async (requirementId: string): Promise<string> => {
     const response = await fetch(`${API_BASE}/pipeline/${requirementId}/review`);
     return handleResponse<string>(response);
+  },
+
+  // Retry endpoints
+  approveRetry: async (requirementId: string, action: RetryAction): Promise<void> => {
+    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+    await handleResponse<void>(response);
+  },
+
+  getRetryInfo: async (requirementId: string): Promise<RetryInfoDto | null> => {
+    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/retry`);
+    return handleResponse<RetryInfoDto | null>(response);
   }
 };
 

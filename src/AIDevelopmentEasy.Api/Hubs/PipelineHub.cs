@@ -85,6 +85,12 @@ public interface IPipelineNotificationService
     Task NotifyProgressAsync(string requirementId, string message, int? progress = null);
     Task NotifyPipelineCompletedAsync(string requirementId, string outputPath);
     Task NotifyRequirementListChangedAsync();
+    
+    // Retry and Fix Task notifications
+    Task NotifyRetryRequiredAsync(string requirementId, PipelinePhase failedPhase, RetryInfoDto retryInfo);
+    Task NotifyFixTasksGeneratedAsync(string requirementId, List<FixTaskDto> fixTasks);
+    Task NotifyTestResultsAsync(string requirementId, TestSummaryDto testSummary);
+    Task NotifyRetryStartingAsync(string requirementId, int attempt, int maxAttempts, PipelinePhase targetPhase);
 }
 
 /// <summary>
@@ -156,6 +162,61 @@ public class SignalRPipelineNotificationService : IPipelineNotificationService
     public async Task NotifyRequirementListChangedAsync()
     {
         await _hubContext.Clients.Group("all_updates").SendAsync("RequirementListChanged");
+    }
+
+    public async Task NotifyRetryRequiredAsync(string requirementId, PipelinePhase failedPhase, RetryInfoDto retryInfo)
+    {
+        var update = CreateUpdate(requirementId, "RetryRequired", failedPhase, 
+            $"Retry required: {retryInfo.Reason}. Attempt {retryInfo.CurrentAttempt}/{retryInfo.MaxAttempts}",
+            retryInfo);
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Retry required for phase {Phase}: {Reason}", 
+            requirementId, failedPhase, retryInfo.Reason);
+    }
+
+    public async Task NotifyFixTasksGeneratedAsync(string requirementId, List<FixTaskDto> fixTasks)
+    {
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "FixTasksGenerated",
+            Phase = PipelinePhase.None,
+            Message = $"{fixTasks.Count} fix task(s) generated",
+            Data = fixTasks
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] {Count} fix tasks generated", requirementId, fixTasks.Count);
+    }
+
+    public async Task NotifyTestResultsAsync(string requirementId, TestSummaryDto testSummary)
+    {
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "TestResults",
+            Phase = PipelinePhase.UnitTesting,
+            Message = $"Tests: {testSummary.Passed}/{testSummary.TotalTests} passed" +
+                     (testSummary.IsBreakingChange ? " ⚠️ BREAKING CHANGE!" : ""),
+            Data = testSummary
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Test results: {Passed}/{Total} passed, {Failed} failed", 
+            requirementId, testSummary.Passed, testSummary.TotalTests, testSummary.Failed);
+    }
+
+    public async Task NotifyRetryStartingAsync(string requirementId, int attempt, int maxAttempts, PipelinePhase targetPhase)
+    {
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "RetryStarting",
+            Phase = targetPhase,
+            Message = $"Starting retry attempt {attempt}/{maxAttempts}, returning to {targetPhase}",
+            Data = new { Attempt = attempt, MaxAttempts = maxAttempts, TargetPhase = targetPhase }
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] Starting retry attempt {Attempt}/{Max} → {Phase}", 
+            requirementId, attempt, maxAttempts, targetPhase);
     }
 
     private PipelineUpdateMessage CreateUpdate(string requirementId, string updateType, PipelinePhase phase, string message, object? data = null)

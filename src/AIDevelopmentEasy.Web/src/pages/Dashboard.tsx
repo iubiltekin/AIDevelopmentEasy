@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, Activity, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
 import { RequirementDto, RequirementStatus } from '../types';
 import { requirementsApi, pipelineApi } from '../services/api';
@@ -7,6 +7,7 @@ import { RequirementCard } from '../components/RequirementCard';
 import { useSignalR } from '../hooks/useSignalR';
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [requirements, setRequirements] = useState<RequirementDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export function Dashboard() {
   const handleStart = async (id: string) => {
     try {
       await pipelineApi.start(id);
-      await loadRequirements();
+      navigate(`/pipeline/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start pipeline');
     }

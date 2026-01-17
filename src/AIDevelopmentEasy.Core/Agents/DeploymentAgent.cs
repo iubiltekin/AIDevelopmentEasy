@@ -594,12 +594,13 @@ public class DeploymentAgent
         foreach (var projectPath in projectsToBuild)
         {
             var projectName = Path.GetFileNameWithoutExtension(projectPath);
-            
-            // Use "Test" configuration for unit test projects, "Debug" for others
+
+            // Use "LocalTest" configuration for unit test projects, "Debug" for others
+            // LocalTest configuration is used for local testing before PR creation
             var isTestProject = projectName.Contains("Test", StringComparison.OrdinalIgnoreCase) ||
                                projectName.Contains("UnitTest", StringComparison.OrdinalIgnoreCase);
-            var configuration = isTestProject ? "Test" : "Debug";
-            
+            var configuration = isTestProject ? "LocalTest" : "Debug";
+
             _logger?.LogInformation("[Deployment] Building project: {Project} (Configuration: {Config})",
                 projectName, configuration);
 

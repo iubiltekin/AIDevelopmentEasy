@@ -150,6 +150,33 @@ public class PipelineController : ControllerBase
         var outputs = await _outputRepository.ListOutputsAsync(cancellationToken);
         return Ok(outputs);
     }
+
+    /// <summary>
+    /// Approve retry with specified action
+    /// </summary>
+    [HttpPost("{requirementId}/retry")]
+    public async Task<ActionResult> ApproveRetry(
+        string requirementId,
+        [FromBody] ApproveRetryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var approved = await _pipelineService.ApproveRetryAsync(requirementId, request.Action, cancellationToken);
+        
+        if (!approved)
+            return BadRequest("Cannot approve retry - no retry pending");
+
+        return Ok(new { Message = $"Retry approved with action: {request.Action}" });
+    }
+
+    /// <summary>
+    /// Get current retry info if any
+    /// </summary>
+    [HttpGet("{requirementId}/retry")]
+    public async Task<ActionResult<RetryInfoDto?>> GetRetryInfo(string requirementId, CancellationToken cancellationToken)
+    {
+        var retryInfo = await _pipelineService.GetRetryInfoAsync(requirementId, cancellationToken);
+        return Ok(retryInfo);
+    }
 }
 
 public class RejectPhaseRequest

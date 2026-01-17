@@ -22,13 +22,15 @@ export enum TaskStatus {
 
 export enum PipelinePhase {
   None = 0,
-  Analysis = 1,    // CodeAnalysisAgent - Codebase analysis (optional)
-  Planning = 2,    // PlannerAgent - Task decomposition
-  Coding = 3,      // CoderAgent - Code generation/modification
-  Debugging = 4,   // DebuggerAgent - Testing and fixing
-  Reviewing = 5,   // ReviewerAgent - Quality review
-  Deployment = 6,  // DeploymentAgent - Deploy to codebase and build
-  Completed = 7
+  Analysis = 1,           // CodeAnalysisAgent - Codebase analysis (optional)
+  Planning = 2,           // PlannerAgent - Task decomposition
+  Coding = 3,             // CoderAgent - Code generation/modification
+  Debugging = 4,          // DebuggerAgent - Testing and fixing
+  Reviewing = 5,          // ReviewerAgent - Quality review
+  Deployment = 6,         // DeploymentAgent - Deploy to codebase and build
+  UnitTesting = 7, // Run new/modified tests in deployed codebase
+  PullRequest = 8,        // Create GitHub PR (after tests pass)
+  Completed = 9
 }
 
 export enum PhaseState {
@@ -37,7 +39,8 @@ export enum PhaseState {
   Running = 2,
   Completed = 3,
   Failed = 4,
-  Skipped = 5
+  Skipped = 5,
+  WaitingRetryApproval = 6  // Waiting for user to approve auto-fix retry
 }
 
 export interface TaskDto {
@@ -83,6 +86,77 @@ export interface PipelineStatusDto {
   phases: PhaseStatusDto[];
   startedAt?: string;
   completedAt?: string;
+  retryInfo?: RetryInfoDto;
+  retryTargetPhase?: PipelinePhase;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Retry and Fix Task Types
+// ════════════════════════════════════════════════════════════════════════════
+
+export enum FixTaskType {
+  BuildError = 0,
+  TestFailure = 1,
+  IntegrationError = 2
+}
+
+export enum RetryReason {
+  BuildFailed = 0,
+  TestsFailed = 1,
+  IntegrationFailed = 2
+}
+
+export enum RetryAction {
+  AutoFix = 0,
+  ManualFix = 1,
+  SkipTests = 2,
+  Abort = 3
+}
+
+export interface FixTaskDto {
+  index: number;
+  title: string;
+  description: string;
+  targetFile: string;
+  type: FixTaskType;
+  errorMessage: string;
+  errorLocation?: string;
+  stackTrace?: string;
+  suggestedFix?: string;
+}
+
+export interface TestResultDto {
+  testName: string;
+  className: string;
+  filePath?: string;
+  passed: boolean;
+  errorMessage?: string;
+  stackTrace?: string;
+  duration: string;
+  isNewTest: boolean;
+}
+
+export interface TestSummaryDto {
+  totalTests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  newTestsPassed: number;
+  newTestsFailed: number;
+  existingTestsFailed: number;
+  totalDuration: string;
+  isBreakingChange: boolean;
+  failedTests: TestResultDto[];
+}
+
+export interface RetryInfoDto {
+  currentAttempt: number;
+  maxAttempts: number;
+  reason: RetryReason;
+  fixTasks: FixTaskDto[];
+  lastError?: string;
+  testSummary?: TestSummaryDto;
+  lastAttemptAt?: string;
 }
 
 export interface PipelineUpdateMessage {
@@ -203,6 +277,8 @@ export function getPhaseLabel(phase: PipelinePhase): string {
     [PipelinePhase.Debugging]: 'Debugging',
     [PipelinePhase.Reviewing]: 'Reviewing',
     [PipelinePhase.Deployment]: 'Deployment',
+    [PipelinePhase.UnitTesting]: 'Unit Testing',
+    [PipelinePhase.PullRequest]: 'Pull Request',
     [PipelinePhase.Completed]: 'Completed'
   };
   return labels[phase] || 'Unknown';
@@ -218,6 +294,8 @@ export function getPhaseDescription(phase: PipelinePhase): string {
     [PipelinePhase.Debugging]: 'DebuggerAgent verifying and fixing code',
     [PipelinePhase.Reviewing]: 'ReviewerAgent checking code quality',
     [PipelinePhase.Deployment]: 'DeploymentAgent deploying code to codebase and building',
+    [PipelinePhase.UnitTesting]: 'Running new/modified tests in deployed codebase',
+    [PipelinePhase.PullRequest]: 'Creating GitHub Pull Request',
     [PipelinePhase.Completed]: 'Pipeline completed successfully'
   };
   return descriptions[phase] || '';
@@ -233,15 +311,49 @@ export function getPhaseAgent(phase: PipelinePhase): string | null {
     [PipelinePhase.Debugging]: 'DebuggerAgent',
     [PipelinePhase.Reviewing]: 'ReviewerAgent',
     [PipelinePhase.Deployment]: 'DeploymentAgent',
+    [PipelinePhase.UnitTesting]: 'TestRunner',
+    [PipelinePhase.PullRequest]: 'GitHubService',
     [PipelinePhase.Completed]: null
   };
   return agents[phase];
+}
+
+// Get retry reason label
+export function getRetryReasonLabel(reason: RetryReason): string {
+  const labels: Record<RetryReason, string> = {
+    [RetryReason.BuildFailed]: 'Build Failed',
+    [RetryReason.TestsFailed]: 'Tests Failed',
+    [RetryReason.IntegrationFailed]: 'Integration Failed'
+  };
+  return labels[reason] || 'Unknown';
+}
+
+// Get retry action label
+export function getRetryActionLabel(action: RetryAction): string {
+  const labels: Record<RetryAction, string> = {
+    [RetryAction.AutoFix]: 'Auto-fix and Retry',
+    [RetryAction.ManualFix]: 'Manual Fix Required',
+    [RetryAction.SkipTests]: 'Skip Tests and Continue',
+    [RetryAction.Abort]: 'Abort Pipeline'
+  };
+  return labels[action] || 'Unknown';
+}
+
+// Get fix task type label
+export function getFixTaskTypeLabel(type: FixTaskType): string {
+  const labels: Record<FixTaskType, string> = {
+    [FixTaskType.BuildError]: 'Build Error',
+    [FixTaskType.TestFailure]: 'Test Failure',
+    [FixTaskType.IntegrationError]: 'Integration Error'
+  };
+  return labels[type] || 'Unknown';
 }
 
 export function getPhaseStateColor(state: PhaseState): string {
   const colors: Record<PhaseState, string> = {
     [PhaseState.Pending]: 'text-slate-400',
     [PhaseState.WaitingApproval]: 'text-amber-400',
+    [PhaseState.WaitingRetryApproval]: 'text-orange-400',
     [PhaseState.Running]: 'text-blue-400',
     [PhaseState.Completed]: 'text-emerald-400',
     [PhaseState.Failed]: 'text-red-400',

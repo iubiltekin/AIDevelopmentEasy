@@ -164,6 +164,14 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
     new DeploymentAgent(sp.GetRequiredService<ILogger<DeploymentAgent>>()));
 
+builder.Services.AddSingleton(sp =>
+    new UnitTestAgent(
+        sp.GetRequiredService<ILogger<UnitTestAgent>>(),
+        maxParallelProjects: 4,
+        testTimeoutSeconds: 300,
+        configuration: "LocalTest",
+        nunitConsolePath: UnitTestAgent.DefaultNUnitConsolePath));
+
 // Pipeline Services
 builder.Services.AddSingleton<IPipelineNotificationService, SignalRPipelineNotificationService>();
 builder.Services.AddSingleton<IPipelineService, PipelineService>();
