@@ -20,6 +20,11 @@ export enum TaskStatus {
   Failed = 3
 }
 
+export enum TaskType {
+  Original = 0,  // Original task from planning phase
+  Fix = 1        // Fix task generated from test/build failures
+}
+
 export enum PipelinePhase {
   None = 0,
   Analysis = 1,           // CodeAnalysisAgent - Codebase analysis (optional)
@@ -52,10 +57,13 @@ export interface TaskDto {
   dependsOnProjects: string[];
   projectOrder: number;
   status: TaskStatus;
+  type?: TaskType;           // Original = 0, Fix = 1
+  retryAttempt?: number;     // Retry attempt number (0 = initial, 1+ = retry)
   usesExisting?: string[];
   isModification?: boolean;  // true = modify existing file, false = create new file
   fullPath?: string;         // full path to target file for modifications
   namespace?: string;        // target namespace for generated code
+  existingCode?: string;     // existing code content for fix tasks (preserved before rollback)
 }
 
 export interface RequirementDto {

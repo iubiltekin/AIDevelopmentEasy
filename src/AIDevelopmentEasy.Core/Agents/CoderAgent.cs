@@ -27,6 +27,20 @@ public class CoderAgent : BaseAgent
         _targetLanguage = targetLanguage;
     }
 
+    /// <summary>
+    /// Direct LLM call for analysis tasks (e.g., test failure analysis)
+    /// Exposed publicly for PipelineService to use
+    /// </summary>
+    public async Task<(string Content, int Tokens)> CallLLMDirectAsync(
+        string systemPrompt,
+        string userPrompt,
+        float temperature = 0.3f,
+        int maxTokens = 4000,
+        CancellationToken cancellationToken = default)
+    {
+        return await CallLLMAsync(systemPrompt, userPrompt, temperature, maxTokens, cancellationToken);
+    }
+
     protected override string GetSystemPrompt()
     {
         if (IsCSharp)

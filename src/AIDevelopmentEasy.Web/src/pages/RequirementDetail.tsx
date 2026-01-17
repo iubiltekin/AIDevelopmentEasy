@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save } from 'lucide-react';
-import { RequirementDto, RequirementStatus, TaskStatus, PipelineStatusDto } from '../types';
+import { RequirementDto, RequirementStatus, TaskStatus, TaskType, PipelineStatusDto } from '../types';
 import { requirementsApi, pipelineApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { PipelineHistorySummary } from '../components/PipelineHistorySummary';
@@ -388,9 +388,12 @@ export function RequirementDetail() {
                 {requirement.tasks.map((task, index) => (
                   <div
                     key={index}
-                    className={`p-4 bg-slate-900 rounded-lg border ${task.isModification
-                      ? 'border-amber-500/50'
-                      : 'border-slate-700'
+                    className={`p-4 bg-slate-900 rounded-lg border ${
+                      task.type === TaskType.Fix
+                        ? 'border-red-500/50 bg-red-950/20'
+                        : task.isModification
+                        ? 'border-amber-500/50'
+                        : 'border-slate-700'
                       }`}
                   >
                     <div className="flex items-start justify-between">
@@ -399,7 +402,12 @@ export function RequirementDetail() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-white">{task.title}</span>
-                            {task.isModification && (
+                            {task.type === TaskType.Fix && (
+                              <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded font-semibold">
+                                🔧 Fix {task.retryAttempt ? `#${task.retryAttempt}` : ''}
+                              </span>
+                            )}
+                            {task.isModification && task.type !== TaskType.Fix && (
                               <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
                                 Modify
                               </span>
@@ -410,7 +418,7 @@ export function RequirementDetail() {
                           </div>
                         </div>
                       </div>
-                      <span className="text-xs text-slate-500">#{task.index + 1}</span>
+                      <span className="text-xs text-slate-500">#{task.index}</span>
                     </div>
                     {task.description && (
                       <p className="mt-2 text-sm text-slate-400">{task.description}</p>

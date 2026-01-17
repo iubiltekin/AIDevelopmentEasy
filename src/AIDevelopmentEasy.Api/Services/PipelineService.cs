@@ -46,7 +46,7 @@ public class PipelineService : IPipelineService
 
     // Track running pipelines and their state
     private static readonly ConcurrentDictionary<string, PipelineExecution> _runningPipelines = new();
-    
+
     // Track completed pipelines for status retrieval (keeps last N completed for memory efficiency)
     private static readonly ConcurrentDictionary<string, PipelineStatusDto> _completedPipelines = new();
 
@@ -467,7 +467,12 @@ public class PipelineService : IPipelineService
             {
                 await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding, "Generating/Modifying code...");
 
-                var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+                var allTasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+
+                // Only process PENDING tasks (Original tasks at first run)
+                // This ensures we don't re-process tasks on retry
+                var tasks = allTasks.Where(t => t.Status == Models.TaskStatus.Pending).ToList();
+
                 var projectState = new ProjectState { Requirement = content };
                 var generatedFiles = new ConcurrentDictionary<string, string>();
                 var modifiedFiles = new ConcurrentDictionary<string, string>();
@@ -524,7 +529,20 @@ public class PipelineService : IPipelineService
                             if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
                                 response.Data.TryGetValue("code", out var code))
                             {
-                                var fileKey = $"{projectGroup.ProjectName}/{filename}";
+                                var filenameStr = filename.ToString()!;
+
+                                // Avoid duplicate project name in path - if filename already includes project name, use it directly
+                                string fileKey;
+                                if (filenameStr.StartsWith(projectGroup.ProjectName + "/", StringComparison.OrdinalIgnoreCase) ||
+                                    filenameStr.StartsWith(projectGroup.ProjectName + "\\", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    fileKey = filenameStr.Replace("\\", "/");
+                                }
+                                else
+                                {
+                                    fileKey = $"{projectGroup.ProjectName}/{filenameStr}";
+                                }
+
                                 projectFiles[fileKey] = code.ToString()!;
                                 generatedFiles[fileKey] = code.ToString()!;
 
@@ -911,10 +929,10 @@ public class PipelineService : IPipelineService
             execution.Status.CurrentPhase = PipelinePhase.Completed;
             execution.Status.CompletedAt = DateTime.UtcNow;
             execution.Status.IsRunning = false;
-            
+
             // Store completed status for later retrieval (in-memory)
             _completedPipelines[requirementId] = CloneStatus(execution.Status);
-            
+
             // Save pipeline history to disk for permanent access
             await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
         }
@@ -1294,10 +1312,22 @@ public class PipelineService : IPipelineService
         CancellationToken ct)
     {
         // Check if this task is a modification task
-        if (task.IsModification && !string.IsNullOrEmpty(task.FullPath))
+        if (task.IsModification)
         {
-            // Load the current file content
-            var currentContent = await _codeAnalysisAgent.GetFileContentAsync(task.FullPath);
+            // Try to load the current file content from file system first
+            string? currentContent = null;
+
+            if (!string.IsNullOrEmpty(task.FullPath))
+            {
+                currentContent = await _codeAnalysisAgent.GetFileContentAsync(task.FullPath);
+            }
+
+            // If file doesn't exist (e.g., after rollback), use the preserved ExistingCode
+            if (string.IsNullOrEmpty(currentContent) && !string.IsNullOrEmpty(task.ExistingCode))
+            {
+                _logger.LogInformation("[Coding] Using preserved ExistingCode for task (file was rolled back): {Task}", task.Title);
+                currentContent = task.ExistingCode;
+            }
 
             if (string.IsNullOrEmpty(currentContent))
             {
@@ -1306,17 +1336,21 @@ public class PipelineService : IPipelineService
                 return await ExecuteGenerationCodingAsync(task, projectState, ct);
             }
 
-            _logger.LogInformation("[Coding] Executing modification for: {FilePath}", task.FullPath);
+            _logger.LogInformation("[Coding] Executing modification for: {FilePath}", task.FullPath ?? task.TargetFiles.FirstOrDefault());
 
             var context = new Dictionary<string, string>
             {
                 ["is_modification"] = "true",
                 ["current_content"] = currentContent,
-                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? Path.GetFileName(task.FullPath),
-                ["full_path"] = task.FullPath,
+                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? (task.FullPath != null ? Path.GetFileName(task.FullPath) : "unknown.cs"),
                 ["task_index"] = task.Index.ToString(),
                 ["project_name"] = task.ProjectName ?? "default"
             };
+
+            if (!string.IsNullOrEmpty(task.FullPath))
+            {
+                context["full_path"] = task.FullPath;
+            }
 
             // Add namespace if available
             if (!string.IsNullOrEmpty(task.Namespace))
@@ -1449,8 +1483,10 @@ public class PipelineService : IPipelineService
                 _logger.LogWarning("[{RequirementId}] Integration tests failed: {Failed}/{Total}",
                     requirementId, testResults.Failed, testResults.TotalTests);
 
-                // Generate fix tasks from test failures - pass generated files, codebase analysis, and deployment result for full context
-                var fixTasks = GenerateFixTasksFromTestFailures(testResults, execution.GeneratedFiles, codebaseAnalysis, deploymentResult);
+                // Generate fix tasks from test failures with LLM analysis
+                // LLM determines whether to fix test or implementation based on error analysis
+                await _notificationService.NotifyProgressAsync(requirementId, "🔍 Analyzing test failures with LLM to determine fix target...");
+                var fixTasks = await GenerateFixTasksFromTestFailuresAsync(testResults, execution.GeneratedFiles, codebaseAnalysis, deploymentResult, ct);
 
                 // Check if this is a breaking change (existing tests failing)
                 if (testResults.IsBreakingChange)
@@ -1616,14 +1652,112 @@ public class PipelineService : IPipelineService
     }
 
     /// <summary>
-    /// Generate fix tasks from test failures with detailed context for LLM
-    /// Uses codebase analysis for project structure, conventions, and file paths
+    /// Analyze test failure using LLM to determine which file needs fixing
+    /// Returns: "test" if test file needs fixing, "implementation" if impl needs fixing
     /// </summary>
-    private List<FixTaskDto> GenerateFixTasksFromTestFailures(
+    private async Task<TestFailureAnalysis> AnalyzeTestFailureWithLLMAsync(
+        string testMethodName,
+        string errorMessage,
+        string? stackTrace,
+        string testCode,
+        string implementationCode,
+        string testFileName,
+        string implementationFileName,
+        CancellationToken ct)
+    {
+        var prompt = $@"## TEST FAILURE ANALYSIS
+
+A unit test has failed. Analyze the error and determine which file needs to be fixed.
+
+### FAILED TEST
+- **Test Method:** `{testMethodName}`
+- **Error Message:** {errorMessage}
+- **Stack Trace:** {stackTrace ?? "N/A"}
+
+### TEST CODE ({testFileName})
+```csharp
+{testCode}
+```
+
+### IMPLEMENTATION CODE ({implementationFileName})
+```csharp
+{implementationCode}
+```
+
+## YOUR TASK
+Analyze the test failure and determine:
+1. Is the TEST code wrong (incorrect assertion, wrong expected value)?
+2. Or is the IMPLEMENTATION code wrong (buggy logic, missing functionality)?
+
+## RESPONSE FORMAT (JSON only, no markdown):
+{{
+  ""file_to_fix"": ""test"" or ""implementation"",
+  ""reason"": ""Brief explanation why this file needs fixing"",
+  ""suggested_fix"": ""What specific change should be made""
+}}";
+
+        try
+        {
+            var (response, tokens) = await _coderAgent.CallLLMDirectAsync(
+                "You are a code analyst. Analyze test failures and determine which file (test or implementation) needs to be fixed. Always respond with valid JSON only.",
+                prompt,
+                temperature: 0.1f,
+                maxTokens: 500,
+                ct);
+
+            _logger.LogInformation("[ErrorAnalysis] LLM response: {Response}", response);
+
+            // Parse JSON response
+            var jsonMatch = System.Text.RegularExpressions.Regex.Match(response, @"\{[\s\S]*\}");
+            if (jsonMatch.Success)
+            {
+                var json = System.Text.Json.JsonDocument.Parse(jsonMatch.Value);
+                var root = json.RootElement;
+
+                return new TestFailureAnalysis
+                {
+                    FileToFix = root.GetProperty("file_to_fix").GetString() ?? "implementation",
+                    Reason = root.GetProperty("reason").GetString() ?? "",
+                    SuggestedFix = root.GetProperty("suggested_fix").GetString() ?? "",
+                    TokensUsed = tokens
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ErrorAnalysis] Failed to analyze test failure, defaulting to implementation");
+        }
+
+        // Default to implementation if analysis fails
+        return new TestFailureAnalysis
+        {
+            FileToFix = "implementation",
+            Reason = "Analysis failed, defaulting to implementation fix",
+            SuggestedFix = "Review the implementation code"
+        };
+    }
+
+    /// <summary>
+    /// Result of LLM-based test failure analysis
+    /// </summary>
+    private class TestFailureAnalysis
+    {
+        public string FileToFix { get; set; } = "implementation";
+        public string Reason { get; set; } = "";
+        public string SuggestedFix { get; set; } = "";
+        public int TokensUsed { get; set; }
+    }
+
+    /// <summary>
+    /// Generate fix tasks from test failures with LLM analysis
+    /// Determines whether to fix test or implementation based on error analysis
+    /// </summary>
+    private async Task<List<FixTaskDto>> GenerateFixTasksFromTestFailuresAsync(
         TestSummaryDto testSummary,
         Dictionary<string, string>? generatedFiles = null,
         Core.Models.CodebaseAnalysis? codebaseAnalysis = null,
-        DeploymentResult? deploymentResult = null)
+        DeploymentResult? deploymentResult = null,
+        CancellationToken ct = default)
     {
         var fixTasks = new List<FixTaskDto>();
         int index = 1;
@@ -1643,9 +1777,12 @@ public class PipelineService : IPipelineService
             string implementationCode = "";
             string testFile = "";
             string testCode = "";
-            string projectName = "";
-            string targetNamespace = "";
-            string fullPath = "";  // Actual file path in codebase for modification
+            string implProjectName = "";
+            string testProjectName = "";
+            string implNamespace = "";
+            string testNamespace = "";
+            string implFullPath = "";
+            string testFullPath = "";
 
             if (generatedFiles != null)
             {
@@ -1658,20 +1795,17 @@ public class PipelineService : IPipelineService
                 {
                     implementationFile = implFileEntry.Key;
                     implementationCode = implFileEntry.Value;
-                    // Extract project name from path (e.g., "Picus.Common.Dev/Helpers/DateTimeHelper.cs")
                     var parts = implFileEntry.Key.Split('/');
                     if (parts.Length > 0)
                     {
-                        projectName = parts[0];
+                        implProjectName = parts[0];
                     }
-                    // Extract namespace from code
                     var nsMatch = System.Text.RegularExpressions.Regex.Match(implementationCode, @"namespace\s+([\w.]+)");
                     if (nsMatch.Success)
                     {
-                        targetNamespace = nsMatch.Groups[1].Value;
+                        implNamespace = nsMatch.Groups[1].Value;
                     }
 
-                    // Try to find full path from deployment result
                     if (deploymentResult?.CopiedFiles != null)
                     {
                         var deployedFile = deploymentResult.CopiedFiles.FirstOrDefault(df =>
@@ -1679,7 +1813,7 @@ public class PipelineService : IPipelineService
                             !df.TargetPath.Contains("Test", StringComparison.OrdinalIgnoreCase));
                         if (deployedFile != null)
                         {
-                            fullPath = deployedFile.TargetPath;
+                            implFullPath = deployedFile.TargetPath;
                         }
                     }
                 }
@@ -1693,7 +1827,80 @@ public class PipelineService : IPipelineService
                 {
                     testFile = testFileEntry.Key;
                     testCode = testFileEntry.Value;
+                    var parts = testFileEntry.Key.Split('/');
+                    if (parts.Length > 0)
+                    {
+                        testProjectName = parts[0];
+                    }
+                    var nsMatch = System.Text.RegularExpressions.Regex.Match(testCode, @"namespace\s+([\w.]+)");
+                    if (nsMatch.Success)
+                    {
+                        testNamespace = nsMatch.Groups[1].Value;
+                    }
+
+                    if (deploymentResult?.CopiedFiles != null)
+                    {
+                        var deployedFile = deploymentResult.CopiedFiles.FirstOrDefault(df =>
+                            df.TargetPath.Contains($"{implementationClass}Test", StringComparison.OrdinalIgnoreCase));
+                        if (deployedFile != null)
+                        {
+                            testFullPath = deployedFile.TargetPath;
+                        }
+                    }
                 }
+            }
+
+            // Use LLM to analyze which file needs fixing
+            var firstFailedTest = failedTests.First();
+            TestFailureAnalysis analysis;
+
+            if (!string.IsNullOrEmpty(testCode) && !string.IsNullOrEmpty(implementationCode))
+            {
+                _logger.LogInformation("[{Class}] Analyzing test failure with LLM to determine fix target...", implementationClass);
+
+                analysis = await AnalyzeTestFailureWithLLMAsync(
+                    firstFailedTest.TestName,
+                    firstFailedTest.ErrorMessage ?? "Unknown error",
+                    firstFailedTest.StackTrace,
+                    testCode,
+                    implementationCode,
+                    testFile,
+                    implementationFile,
+                    ct);
+
+                _logger.LogInformation("[{Class}] LLM Analysis: Fix '{FileToFix}' - {Reason}",
+                    implementationClass, analysis.FileToFix, analysis.Reason);
+            }
+            else
+            {
+                // Default to implementation if we can't get both codes
+                analysis = new TestFailureAnalysis
+                {
+                    FileToFix = "implementation",
+                    Reason = "Could not load both test and implementation code",
+                    SuggestedFix = "Review the implementation"
+                };
+            }
+
+            // Determine target file based on analysis
+            string targetFile, targetCode, targetProjectName, targetNamespace, targetFullPath;
+            bool isTestFix = analysis.FileToFix.Equals("test", StringComparison.OrdinalIgnoreCase);
+
+            if (isTestFix)
+            {
+                targetFile = testFile;
+                targetCode = testCode;
+                targetProjectName = testProjectName;
+                targetNamespace = testNamespace;
+                targetFullPath = testFullPath;
+            }
+            else
+            {
+                targetFile = implementationFile;
+                targetCode = implementationCode;
+                targetProjectName = implProjectName;
+                targetNamespace = implNamespace;
+                targetFullPath = implFullPath;
             }
 
             // Build detailed error description
@@ -1728,8 +1935,8 @@ public class PipelineService : IPipelineService
                 description.AppendLine();
                 description.AppendLine("## CODEBASE CONTEXT");
                 description.AppendLine($"- **Codebase:** {codebaseAnalysis.CodebaseName}");
-                description.AppendLine($"- **Target Framework:** {codebaseAnalysis.Projects.FirstOrDefault(p => p.Name == projectName)?.TargetFramework ?? "Unknown"}");
-                
+                description.AppendLine($"- **Target Framework:** {codebaseAnalysis.Projects.FirstOrDefault(p => p.Name == targetProjectName)?.TargetFramework ?? "Unknown"}");
+
                 // Add coding conventions
                 if (codebaseAnalysis.Conventions != null)
                 {
@@ -1748,9 +1955,9 @@ public class PipelineService : IPipelineService
                 }
 
                 // Add project info
-                var projectInfo = codebaseAnalysis.Projects.FirstOrDefault(p => 
-                    p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase) ||
-                    p.Name.Replace(".Dev", "").Equals(projectName.Replace(".Dev", ""), StringComparison.OrdinalIgnoreCase));
+                var projectInfo = codebaseAnalysis.Projects.FirstOrDefault(p =>
+                    p.Name.Equals(targetProjectName, StringComparison.OrdinalIgnoreCase) ||
+                    p.Name.Replace(".Dev", "").Equals(targetProjectName.Replace(".Dev", ""), StringComparison.OrdinalIgnoreCase));
                 if (projectInfo != null)
                 {
                     description.AppendLine();
@@ -1766,61 +1973,112 @@ public class PipelineService : IPipelineService
             description.AppendLine();
             description.AppendLine("---");
             description.AppendLine();
+
+            // Add LLM analysis result
+            description.AppendLine("## 🔍 ERROR ANALYSIS RESULT");
+            description.AppendLine($"**File to fix:** `{(isTestFix ? "TEST" : "IMPLEMENTATION")}`");
+            description.AppendLine($"**Reason:** {analysis.Reason}");
+            description.AppendLine($"**Suggested fix:** {analysis.SuggestedFix}");
+            description.AppendLine();
+            description.AppendLine("---");
+            description.AppendLine();
             description.AppendLine(errorDetails.ToString());
 
-            if (!string.IsNullOrEmpty(implementationCode))
+            if (isTestFix)
             {
+                // TEST needs fixing - show test code as primary
                 description.AppendLine("---");
                 description.AppendLine();
-                description.AppendLine($"## EXISTING IMPLEMENTATION CODE");
-                description.AppendLine($"**File:** `{implementationFile}`");
-                if (!string.IsNullOrEmpty(fullPath))
-                    description.AppendLine($"**Full Path:** `{fullPath}`");
-                description.AppendLine();
-                description.AppendLine("**⚠️ Modify THIS code to fix the test - DO NOT create new file:**");
-                description.AppendLine();
-                description.AppendLine("```csharp");
-                description.AppendLine(implementationCode);
-                description.AppendLine("```");
-                description.AppendLine();
-            }
-
-            if (!string.IsNullOrEmpty(testCode))
-            {
-                description.AppendLine("---");
-                description.AppendLine();
-                description.AppendLine($"## TEST CODE (File: {testFile}) - For reference only");
-                description.AppendLine("**DO NOT modify the test, fix the implementation instead:**");
+                description.AppendLine($"## ⚠️ TEST CODE TO FIX (File: {testFile})");
+                description.AppendLine("**This is the file you need to modify:**");
+                if (!string.IsNullOrEmpty(testFullPath))
+                    description.AppendLine($"**Full Path:** `{testFullPath}`");
                 description.AppendLine();
                 description.AppendLine("```csharp");
                 description.AppendLine(testCode);
                 description.AppendLine("```");
+                description.AppendLine();
+
+                if (!string.IsNullOrEmpty(implementationCode))
+                {
+                    description.AppendLine("---");
+                    description.AppendLine();
+                    description.AppendLine($"## IMPLEMENTATION CODE (File: {implementationFile}) - For reference only");
+                    description.AppendLine("**The implementation is correct, fix the test instead:**");
+                    description.AppendLine();
+                    description.AppendLine("```csharp");
+                    description.AppendLine(implementationCode);
+                    description.AppendLine("```");
+                }
             }
+            else
+            {
+                // IMPLEMENTATION needs fixing - show impl code as primary
+                if (!string.IsNullOrEmpty(implementationCode))
+                {
+                    description.AppendLine("---");
+                    description.AppendLine();
+                    description.AppendLine($"## ⚠️ IMPLEMENTATION CODE TO FIX (File: {implementationFile})");
+                    description.AppendLine("**This is the file you need to modify:**");
+                    if (!string.IsNullOrEmpty(implFullPath))
+                        description.AppendLine($"**Full Path:** `{implFullPath}`");
+                    description.AppendLine();
+                    description.AppendLine("```csharp");
+                    description.AppendLine(implementationCode);
+                    description.AppendLine("```");
+                    description.AppendLine();
+                }
+
+                if (!string.IsNullOrEmpty(testCode))
+                {
+                    description.AppendLine("---");
+                    description.AppendLine();
+                    description.AppendLine($"## TEST CODE (File: {testFile}) - For reference only");
+                    description.AppendLine("**The test is correct, fix the implementation instead:**");
+                    description.AppendLine();
+                    description.AppendLine("```csharp");
+                    description.AppendLine(testCode);
+                    description.AppendLine("```");
+                }
+            }
+
+            // Extract class name from target file
+            var targetClassName = isTestFix ? $"{implementationClass}Tests" : implementationClass;
 
             description.AppendLine();
             description.AppendLine("---");
             description.AppendLine();
             description.AppendLine("## YOUR TASK:");
             description.AppendLine($"1. Keep the SAME namespace: `{targetNamespace}`");
-            description.AppendLine($"2. Keep the SAME class name: `{implementationClass}`");
+            description.AppendLine($"2. Keep the SAME class name: `{targetClassName}`");
             description.AppendLine($"3. Keep the SAME file structure (do not rename or move the file)");
-            description.AppendLine("4. Only modify the method(s) that are causing the test to fail");
+            description.AppendLine($"4. Fix the {(isTestFix ? "test assertion/expectation" : "implementation logic")} as suggested above");
             description.AppendLine("5. Return the COMPLETE fixed file content with ALL existing methods intact");
             description.AppendLine("6. Follow the codebase conventions listed above");
+
+            var fixTitle = isTestFix
+                ? $"Fix {implementationClass}Tests - {failedTests.Count} test(s) have incorrect assertions"
+                : $"Fix {implementationClass} - {failedTests.Count} test(s) failing";
+
+            var suggestedFixText = isTestFix
+                ? $"Modify the test file {testFile} to fix incorrect assertions. {analysis.SuggestedFix}"
+                : $"Modify the implementation {implementationFile} to make the tests pass. {analysis.SuggestedFix}";
 
             fixTasks.Add(new FixTaskDto
             {
                 Index = index++,
-                Title = $"Fix {implementationClass} - {failedTests.Count} test(s) failing",
+                Title = fixTitle,
                 Description = description.ToString(),
-                TargetFile = implementationFile,
+                TargetFile = targetFile,
                 Type = FixTaskType.TestFailure,
                 ErrorMessage = string.Join("; ", failedTests.Select(t => t.ErrorMessage)),
                 StackTrace = failedTests.FirstOrDefault()?.StackTrace,
-                SuggestedFix = $"Modify the existing {implementationClass} class to make the failing tests pass. Do NOT create new files.",
-                ProjectName = projectName,
+                SuggestedFix = suggestedFixText,
+                ProjectName = targetProjectName,
                 Namespace = targetNamespace,
-                FullPath = fullPath  // For ExecuteModificationCodingAsync to use
+                FullPath = targetFullPath,  // For ExecuteModificationCodingAsync to use
+                // Preserve existing code from generatedFiles BEFORE rollback - crucial for LLM
+                ExistingCode = targetCode
             });
         }
 
@@ -1870,18 +2128,11 @@ public class PipelineService : IPipelineService
         await _notificationService.NotifyRetryStartingAsync(
             requirementId, execution.RetryAttempt, PipelineExecution.MaxRetryAttempts, PipelinePhase.Coding);
 
-        // Rollback deployment if needed
-        if (execution.LastDeploymentResult != null && execution.LastDeploymentResult.TotalFilesCopied > 0)
-        {
-            await _notificationService.NotifyProgressAsync(requirementId, "Rolling back deployment for retry...");
-            await _deploymentAgent.RollbackAsync(execution.LastDeploymentResult, ct);
-        }
-
-        // Convert fix tasks to regular tasks and save them
-        // IMPORTANT: Use the correct project name, namespace, and full path from fix task
+        // Convert fix tasks to regular tasks BEFORE rollback 
+        // so we preserve the existing code content for LLM
         var tasks = fixTasks.Select((ft, i) => new TaskDto
         {
-            Index = i + 1,
+            Index = i + 1, // Will be reassigned by AppendFixTasksAsync
             Title = ft.Title,
             // Description already contains detailed instructions from GenerateFixTasksFromTestFailures
             Description = ft.Description,
@@ -1894,10 +2145,24 @@ public class PipelineService : IPipelineService
             // Mark as modification so CoderAgent knows to modify existing code
             IsModification = true,
             // Full path for ExecuteModificationCodingAsync to read current content
-            FullPath = ft.FullPath
+            FullPath = ft.FullPath,
+            // Preserve existing code from generated files for LLM - this is crucial
+            // because the file will be deleted during rollback
+            ExistingCode = ft.ExistingCode,
+            // Mark as fix task
+            Type = TaskType.Fix,
+            RetryAttempt = execution.RetryAttempt
         }).ToList();
 
-        await _taskRepository.SaveTasksAsync(requirementId, tasks, ct);
+        // Rollback deployment if needed
+        if (execution.LastDeploymentResult != null && execution.LastDeploymentResult.TotalFilesCopied > 0)
+        {
+            await _notificationService.NotifyProgressAsync(requirementId, "Rolling back deployment for retry...");
+            await _deploymentAgent.RollbackAsync(execution.LastDeploymentResult, ct);
+        }
+
+        // Append fix tasks to existing tasks (preserves original tasks)
+        await _taskRepository.AppendFixTasksAsync(requirementId, tasks, execution.RetryAttempt, ct);
 
         // Reset phases after Coding to Pending
         foreach (var phase in execution.Status.Phases)
@@ -1943,14 +2208,41 @@ public class PipelineService : IPipelineService
             await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding,
                 $"Retry #{execution.RetryAttempt} - Fixing code based on test failures...");
 
-            var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+            var allTasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+
+            // CRITICAL: Only process FIX tasks that are PENDING for this retry attempt
+            // Do NOT re-process original tasks or already completed fix tasks
+            var fixTasks = allTasks
+                .Where(t => t.Type == TaskType.Fix &&
+                           t.Status == Models.TaskStatus.Pending &&
+                           t.RetryAttempt == execution.RetryAttempt)
+                .ToList();
+
             var projectState = new ProjectState { Requirement = content ?? "" };
             var generatedFiles = new ConcurrentDictionary<string, string>();
 
-            await _notificationService.NotifyProgressAsync(requirementId,
-                $"Processing {tasks.Count} fix task(s)...");
+            // CRITICAL: Load previously generated files from original coding phase
+            // These files were created before the failed test, we need them for deployment
+            if (execution.GeneratedFiles != null && execution.GeneratedFiles.Count > 0)
+            {
+                foreach (var kvp in execution.GeneratedFiles)
+                {
+                    generatedFiles[kvp.Key] = kvp.Value;
+                    projectState.Codebase[kvp.Key] = kvp.Value;
+                }
+                _logger.LogInformation("[{RequirementId}] Loaded {Count} previously generated files for retry",
+                    requirementId, execution.GeneratedFiles.Count);
+            }
 
-            foreach (var task in tasks)
+            // Load previously generated files into project state (from completed original tasks)
+            var completedTasks = allTasks.Where(t => t.Status == Models.TaskStatus.Completed).ToList();
+            _logger.LogInformation("[{RequirementId}] Retry: {CompletedCount} completed tasks, {FixCount} pending fix tasks to process",
+                requirementId, completedTasks.Count, fixTasks.Count);
+
+            await _notificationService.NotifyProgressAsync(requirementId,
+                $"Processing {fixTasks.Count} fix task(s) with {execution.GeneratedFiles?.Count ?? 0} existing files...");
+
+            foreach (var task in fixTasks)
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -1971,8 +2263,22 @@ public class PipelineService : IPipelineService
                     response.Data.TryGetValue("code", out var code))
                 {
                     var projectName = task.ProjectName ?? "fix";
-                    var fileKey = $"{projectName}/{filename}";
+                    var filenameStr = filename.ToString()!;
+
+                    // Avoid duplicate project name in path - if filename already includes project name, use it directly
+                    string fileKey;
+                    if (filenameStr.StartsWith(projectName + "/", StringComparison.OrdinalIgnoreCase) ||
+                        filenameStr.StartsWith(projectName + "\\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fileKey = filenameStr.Replace("\\", "/");
+                    }
+                    else
+                    {
+                        fileKey = $"{projectName}/{filenameStr}";
+                    }
+
                     generatedFiles[fileKey] = code.ToString()!;
+                    _logger.LogInformation("[{RequirementId}] Fix task added file: {FileKey}", requirementId, fileKey);
                 }
 
                 task.Status = Models.TaskStatus.Completed;
@@ -1985,6 +2291,12 @@ public class PipelineService : IPipelineService
                 projectState.Codebase[kvp.Key] = kvp.Value;
             }
 
+            // CRITICAL: Update execution.GeneratedFiles with ALL files (original + fixed)
+            // This ensures next phases (deployment, testing) have complete file set
+            execution.GeneratedFiles = generatedFiles.ToDictionary(k => k.Key, v => v.Value);
+            _logger.LogInformation("[{RequirementId}] Updated GeneratedFiles with {Count} total files after fix",
+                requirementId, execution.GeneratedFiles.Count);
+
             // Save output
             var outputPath = await _outputRepository.SaveOutputAsync(
                 requirementId,
@@ -1996,7 +2308,9 @@ public class PipelineService : IPipelineService
             {
                 Files = generatedFiles.ToDictionary(k => k.Key, v => v.Value),
                 OutputPath = outputPath,
-                RetryAttempt = execution.RetryAttempt
+                RetryAttempt = execution.RetryAttempt,
+                OriginalFiles = execution.GeneratedFiles?.Count ?? 0,
+                FixedFiles = fixTasks.Count
             };
         }, ct);
 
@@ -2006,33 +2320,52 @@ public class PipelineService : IPipelineService
             return;
         }
 
-        // Phase: Debugging
+        // Phase: Debugging - Debug ALL generated files together (original + fixed)
         var debuggingResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
         {
             await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging, "Checking for compilation errors...");
 
-            var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
             var projectState = new ProjectState { Requirement = content ?? "" };
 
-            foreach (var task in tasks)
+            // Get ALL generated files (original + fixed)
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+            _logger.LogInformation("[{RequirementId}] Debugging {Count} files (original + fixed)", requirementId, outputFiles.Count);
+
+            foreach (var kvp in outputFiles)
             {
-                var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
-                foreach (var kvp in outputFiles)
+                projectState.Codebase[kvp.Key] = kvp.Value;
+            }
+
+            // Debug each file with full codebase context
+            var debugResults = new Dictionary<string, bool>();
+            foreach (var file in outputFiles)
+            {
+                // Skip test files for debugging (they don't need to compile standalone)
+                if (file.Key.Contains("Test", StringComparison.OrdinalIgnoreCase))
                 {
-                    projectState.Codebase[kvp.Key] = kvp.Value;
+                    _logger.LogInformation("[{RequirementId}] Skipping test file for debug: {File}", requirementId, file.Key);
+                    debugResults[file.Key] = true;
+                    continue;
                 }
 
+                _logger.LogInformation("[{RequirementId}] Debugging file: {File}", requirementId, file.Key);
                 var response = await _debuggerAgent.RunAsync(
-                    new AgentRequest { Input = task.Description ?? "", ProjectState = projectState },
+                    new AgentRequest { Input = file.Value, ProjectState = projectState },
                     ct);
 
+                debugResults[file.Key] = response.Success;
                 if (!response.Success)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Debug issues found for task {task.Index}, fixing...");
+                    await _notificationService.NotifyProgressAsync(requirementId, $"Debug issues found for {Path.GetFileName(file.Key)}, fixing...");
                 }
             }
 
-            return new { Status = "Debugging completed" };
+            return new
+            {
+                Status = "Debugging completed",
+                FileCount = outputFiles.Count,
+                Results = debugResults
+            };
         }, ct);
 
         if (!debuggingResult.Approved)
@@ -2198,10 +2531,10 @@ public class PipelineService : IPipelineService
         execution.Status.CurrentPhase = PipelinePhase.Completed;
         execution.Status.IsRunning = false;
         execution.Status.CompletedAt = DateTime.UtcNow;
-        
+
         // Store completed status for later retrieval (in-memory)
         _completedPipelines[requirementId] = CloneStatus(execution.Status);
-        
+
         // Save pipeline history to disk for permanent access
         await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
 
@@ -2214,7 +2547,7 @@ public class PipelineService : IPipelineService
         _logger.LogInformation("[{RequirementId}] Pipeline completed successfully after {RetryAttempts} retry(s)!",
             requirementId, execution.RetryAttempt);
     }
-    
+
     /// <summary>
     /// Creates a deep clone of PipelineStatusDto to preserve state after pipeline completion
     /// </summary>

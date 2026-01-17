@@ -119,6 +119,44 @@ public class FileSystemTaskRepository : ITaskRepository
         _logger.LogInformation("Updated task {Index} for requirement: {RequirementId}", task.Index, requirementId);
     }
 
+    public async Task AppendFixTasksAsync(string requirementId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default)
+    {
+        var tasksDir = GetTasksDirectory(requirementId);
+        Directory.CreateDirectory(tasksDir);
+
+        // Get current max index from existing tasks
+        var existingFiles = Directory.GetFiles(tasksDir, "task-*.json");
+        int maxIndex = 0;
+        
+        foreach (var file in existingFiles)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            if (fileName.StartsWith("task-") && int.TryParse(fileName.Substring(5), out int idx))
+            {
+                maxIndex = Math.Max(maxIndex, idx);
+            }
+        }
+
+        // Append fix tasks with new indices
+        var fixTaskList = fixTasks.ToList();
+        for (int i = 0; i < fixTaskList.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var task = fixTaskList[i];
+            task.Index = maxIndex + i + 1; // Continue from last index
+            task.Type = TaskType.Fix;
+            task.RetryAttempt = retryAttempt;
+
+            var filePath = GetTaskFilePath(requirementId, task.Index);
+            var json = JsonSerializer.Serialize(task, _jsonOptions);
+            await File.WriteAllTextAsync(filePath, json, cancellationToken);
+        }
+
+        _logger.LogInformation("Appended {Count} fix tasks (retry #{Retry}) for requirement: {RequirementId}. Total tasks: {Total}",
+            fixTaskList.Count, retryAttempt, requirementId, maxIndex + fixTaskList.Count);
+    }
+
     public Task DeleteAllAsync(string requirementId, CancellationToken cancellationToken = default)
     {
         var tasksDir = GetTasksDirectory(requirementId);

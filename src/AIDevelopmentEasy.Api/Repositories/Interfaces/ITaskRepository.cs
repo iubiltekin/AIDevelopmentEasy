@@ -24,6 +24,11 @@ public interface ITaskRepository
     Task SaveTasksAsync(string requirementId, IEnumerable<TaskDto> tasks, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Append fix tasks to existing tasks (preserves original tasks)
+    /// </summary>
+    Task AppendFixTasksAsync(string requirementId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update a single task
     /// </summary>
     Task UpdateTaskAsync(string requirementId, TaskDto task, CancellationToken cancellationToken = default);

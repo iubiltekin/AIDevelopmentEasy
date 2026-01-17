@@ -17,6 +17,17 @@ public class RequirementDto
 }
 
 /// <summary>
+/// Task type indicating whether this is an original or fix task
+/// </summary>
+public enum TaskType
+{
+    /// <summary>Original task created during planning phase</summary>
+    Original = 0,
+    /// <summary>Fix task generated from test/build failures</summary>
+    Fix = 1
+}
+
+/// <summary>
 /// Task information
 /// </summary>
 public class TaskDto
@@ -29,6 +40,16 @@ public class TaskDto
     public List<string> DependsOnProjects { get; set; } = new();
     public int ProjectOrder { get; set; } = 0;
     public TaskStatus Status { get; set; }
+
+    /// <summary>
+    /// Task type: Original (from planning) or Fix (from failures)
+    /// </summary>
+    public TaskType Type { get; set; } = TaskType.Original;
+
+    /// <summary>
+    /// Retry attempt number this task belongs to (0 = initial, 1+ = retry)
+    /// </summary>
+    public int RetryAttempt { get; set; } = 0;
 
     /// <summary>
     /// Existing classes/interfaces from the codebase to use or extend.
@@ -53,6 +74,12 @@ public class TaskDto
     /// Helps ensure correct namespace declaration.
     /// </summary>
     public string? Namespace { get; set; }
+
+    /// <summary>
+    /// Existing code content for fix tasks - contains the code that needs to be modified.
+    /// This is populated from generatedFiles before rollback so it's available for LLM.
+    /// </summary>
+    public string? ExistingCode { get; set; }
 }
 
 /// <summary>
@@ -66,12 +93,12 @@ public class PipelineStatusDto
     public List<PhaseStatusDto> Phases { get; set; } = new();
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
-    
+
     /// <summary>
     /// Retry information when a phase needs to be retried
     /// </summary>
     public RetryInfoDto? RetryInfo { get; set; }
-    
+
     /// <summary>
     /// Target phase to return to after retry approval
     /// </summary>
@@ -263,6 +290,11 @@ public class FixTaskDto
     /// Full path to the file in the codebase (for modification mode)
     /// </summary>
     public string? FullPath { get; set; }
+    /// <summary>
+    /// Existing code content that needs to be modified.
+    /// Captured from generatedFiles BEFORE rollback so it remains available for LLM.
+    /// </summary>
+    public string? ExistingCode { get; set; }
 }
 
 /// <summary>
