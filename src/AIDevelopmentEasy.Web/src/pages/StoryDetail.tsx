@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save } from 'lucide-react';
-import { RequirementDto, RequirementStatus, TaskStatus, TaskType, PipelineStatusDto } from '../types';
-import { requirementsApi, pipelineApi } from '../services/api';
+import { StoryDto, StoryStatus, TaskStatus, TaskType, PipelineStatusDto } from '../types';
+import { storiesApi, pipelineApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { PipelineHistorySummary } from '../components/PipelineHistorySummary';
 
-export function RequirementDetail() {
+export function StoryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [requirement, setRequirement] = useState<RequirementDto | null>(null);
+  const [story, setStory] = useState<StoryDto | null>(null);
   const [content, setContent] = useState<string>('');
   const [editedContent, setEditedContent] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -29,21 +29,21 @@ export function RequirementDetail() {
       try {
         setLoading(true);
         const [req, reqContent] = await Promise.all([
-          requirementsApi.getById(id),
-          requirementsApi.getContent(id).catch(() => '')
+          storiesApi.getById(id),
+          storiesApi.getContent(id).catch(() => '')
         ]);
 
-        setRequirement(req);
+        setStory(req);
         setContent(reqContent);
 
-        if (req.status === RequirementStatus.Completed) {
+        if (req.status === StoryStatus.Completed) {
           const out = await pipelineApi.getOutput(id).catch(() => ({}));
           setOutput(out);
         }
 
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load requirement');
+        setError(err instanceof Error ? err.message : 'Failed to load story');
       } finally {
         setLoading(false);
       }
@@ -64,25 +64,25 @@ export function RequirementDetail() {
 
   const handleReset = async () => {
     if (!id) return;
-    if (!confirm('Reset this requirement? All tasks and output will be cleared.')) return;
+    if (!confirm('Reset this story? All tasks and output will be cleared.')) return;
 
     try {
-      await requirementsApi.reset(id);
+      await storiesApi.reset(id);
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset requirement');
+      setError(err instanceof Error ? err.message : 'Failed to reset story');
     }
   };
 
   const handleDelete = async () => {
     if (!id) return;
-    if (!confirm('Delete this requirement? This cannot be undone.')) return;
+    if (!confirm('Delete this story? This cannot be undone.')) return;
 
     try {
-      await requirementsApi.delete(id);
+      await storiesApi.delete(id);
       navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete requirement');
+      setError(err instanceof Error ? err.message : 'Failed to delete story');
     }
   };
 
@@ -122,7 +122,7 @@ export function RequirementDetail() {
 
     setIsSaving(true);
     try {
-      await requirementsApi.updateContent(id, editedContent);
+      await storiesApi.updateContent(id, editedContent);
       setContent(editedContent);
       setIsEditing(false);
       setEditedContent('');
@@ -134,7 +134,7 @@ export function RequirementDetail() {
     }
   };
 
-  const canEditContent = requirement?.status === RequirementStatus.NotStarted;
+  const canEditContent = story?.status === StoryStatus.NotStarted;
 
   const getTaskStatusIcon = (status: TaskStatus) => {
     switch (status) {
@@ -157,11 +157,11 @@ export function RequirementDetail() {
     );
   }
 
-  if (!requirement) {
+  if (!story) {
     return (
       <div className="flex flex-col items-center justify-center h-full">
         <div className="text-5xl mb-4">🔍</div>
-        <h2 className="text-xl font-semibold text-white mb-2">Requirement Not Found</h2>
+        <h2 className="text-xl font-semibold text-white mb-2">Story Not Found</h2>
         <Link to="/" className="text-blue-400 hover:underline">Back to Dashboard</Link>
       </div>
     );
@@ -180,17 +180,17 @@ export function RequirementDetail() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-white">{requirement.name}</h1>
-              <StatusBadge status={requirement.status} />
+              <h1 className="text-2xl font-bold text-white">{story.name}</h1>
+              <StatusBadge status={story.status} />
             </div>
             <p className="text-slate-400">
-              {requirement.codebaseId ? 'With codebase context' : 'New project requirement'}
+              {story.codebaseId ? 'With codebase context' : 'New project story'}
             </p>
           </div>
         </div>
         <div className="flex gap-3">
-          {requirement.status !== RequirementStatus.InProgress &&
-            requirement.status !== RequirementStatus.Completed && (
+          {story.status !== StoryStatus.InProgress &&
+            story.status !== StoryStatus.Completed && (
               <button
                 onClick={handleStart}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -199,7 +199,7 @@ export function RequirementDetail() {
                 Start Pipeline
               </button>
             )}
-          {requirement.status === RequirementStatus.InProgress && (
+          {story.status === StoryStatus.InProgress && (
             <Link
               to={`/pipeline/${id}`}
               className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors"
@@ -208,7 +208,7 @@ export function RequirementDetail() {
               View Progress
             </Link>
           )}
-          {requirement.status === RequirementStatus.Completed && (
+          {story.status === StoryStatus.Completed && (
             <button
               onClick={handleShowHistory}
               className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
@@ -266,29 +266,29 @@ export function RequirementDetail() {
               <dl className="space-y-3">
                 <div>
                   <dt className="text-sm text-slate-400">ID</dt>
-                  <dd className="text-white font-mono">{requirement.id}</dd>
+                  <dd className="text-white font-mono">{story.id}</dd>
                 </div>
                 <div>
                   <dt className="text-sm text-slate-400">Codebase</dt>
                   <dd className="text-white">
-                    {requirement.codebaseId || 'None (new project)'}
+                    {story.codebaseId || 'None (new project)'}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-sm text-slate-400">Status</dt>
-                  <dd><StatusBadge status={requirement.status} /></dd>
+                  <dd><StatusBadge status={story.status} /></dd>
                 </div>
                 <div>
                   <dt className="text-sm text-slate-400">Created</dt>
                   <dd className="text-white">
-                    {new Date(requirement.createdAt).toLocaleString()}
+                    {new Date(story.createdAt).toLocaleString()}
                   </dd>
                 </div>
-                {requirement.lastProcessedAt && (
+                {story.lastProcessedAt && (
                   <div>
                     <dt className="text-sm text-slate-400">Last Processed</dt>
                     <dd className="text-white">
-                      {new Date(requirement.lastProcessedAt).toLocaleString()}
+                      {new Date(story.lastProcessedAt!).toLocaleString()}
                     </dd>
                   </div>
                 )}
@@ -299,13 +299,13 @@ export function RequirementDetail() {
               <div className="space-y-3">
                 <div className="p-4 bg-slate-900 rounded-lg">
                   <div className="text-3xl font-bold text-blue-400">
-                    {requirement.tasks.length}
+                    {story.tasks.length}
                   </div>
                   <div className="text-sm text-slate-400">Tasks Generated</div>
                 </div>
                 <div className="p-4 bg-slate-900 rounded-lg">
                   <div className="text-3xl font-bold text-emerald-400">
-                    {requirement.tasks.filter(t => t.status === TaskStatus.Completed).length}
+                    {story.tasks.filter(t => t.status === TaskStatus.Completed).length}
                   </div>
                   <div className="text-sm text-slate-400">Tasks Completed</div>
                 </div>
@@ -317,7 +317,7 @@ export function RequirementDetail() {
         {activeTab === 'content' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">Requirement Content</h3>
+              <h3 className="text-lg font-semibold text-white">Story Content</h3>
               {!isEditing && canEditContent && (
                 <button
                   onClick={handleEditContent}
@@ -327,7 +327,7 @@ export function RequirementDetail() {
                   Edit
                 </button>
               )}
-              {!isEditing && !canEditContent && requirement && (
+              {!isEditing && !canEditContent && story && (
                 <div className="text-sm text-slate-500 flex items-center gap-2">
                   <span className="px-2 py-1 bg-amber-500/10 text-amber-400 rounded text-xs">
                     Reset required to edit
@@ -342,7 +342,7 @@ export function RequirementDetail() {
                   value={editedContent}
                   onChange={(e) => setEditedContent(e.target.value)}
                   className="w-full h-96 bg-slate-900 p-4 rounded-lg text-slate-300 font-mono text-sm border border-slate-600 focus:border-blue-500 focus:outline-none resize-y"
-                  placeholder="Enter requirement content..."
+                  placeholder="Enter story content..."
                 />
                 <div className="flex items-center justify-end gap-3">
                   <button
@@ -377,15 +377,15 @@ export function RequirementDetail() {
         {activeTab === 'tasks' && (
           <div>
             <h3 className="text-lg font-semibold text-white mb-4">
-              Tasks ({requirement.tasks.length})
+              Tasks ({story.tasks.length})
             </h3>
-            {requirement.tasks.length === 0 ? (
+            {story.tasks.length === 0 ? (
               <div className="text-center py-8 text-slate-400">
                 No tasks yet. Start the pipeline to generate tasks.
               </div>
             ) : (
               <div className="space-y-3">
-                {requirement.tasks.map((task, index) => (
+                {story.tasks.map((task, index) => (
                   <div
                     key={index}
                     className={`p-4 bg-slate-900 rounded-lg border ${
@@ -488,7 +488,7 @@ export function RequirementDetail() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-white">Pipeline History</h2>
-                  <p className="text-sm text-slate-400">Complete execution summary for {requirement.name}</p>
+                  <p className="text-sm text-slate-400">Complete execution summary for {story.name}</p>
                 </div>
               </div>
               <button
@@ -510,7 +510,7 @@ export function RequirementDetail() {
               ) : (
                 <div className="text-center py-12 text-slate-400">
                   <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No pipeline history found for this requirement.</p>
+                  <p>No pipeline history found for this story.</p>
                   <p className="text-sm mt-2">History is saved when a pipeline completes successfully.</p>
                 </div>
               )}

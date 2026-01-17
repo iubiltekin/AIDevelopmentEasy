@@ -5,7 +5,7 @@ namespace AIDevelopmentEasy.Api.Hubs;
 
 /// <summary>
 /// SignalR Hub for real-time pipeline updates.
-/// Clients can subscribe to specific requirements or receive all updates.
+/// Clients can subscribe to specific storys or receive all updates.
 /// </summary>
 public class PipelineHub : Hub
 {
@@ -35,23 +35,23 @@ public class PipelineHub : Hub
     }
 
     /// <summary>
-    /// Subscribe to updates for a specific requirement
+    /// Subscribe to updates for a specific story
     /// </summary>
-    public async Task SubscribeToRequirement(string requirementId)
+    public async Task SubscribeToStory(string storyId)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"requirement_{requirementId}");
-        _logger.LogInformation("Client {ConnectionId} subscribed to requirement: {RequirementId}", 
-            Context.ConnectionId, requirementId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"story_{storyId}");
+        _logger.LogInformation("Client {ConnectionId} subscribed to story: {StoryId}", 
+            Context.ConnectionId, storyId);
     }
 
     /// <summary>
-    /// Unsubscribe from a specific requirement
+    /// Unsubscribe from a specific story
     /// </summary>
-    public async Task UnsubscribeFromRequirement(string requirementId)
+    public async Task UnsubscribeFromStory(string storyId)
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"requirement_{requirementId}");
-        _logger.LogInformation("Client {ConnectionId} unsubscribed from requirement: {RequirementId}", 
-            Context.ConnectionId, requirementId);
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"story_{storyId}");
+        _logger.LogInformation("Client {ConnectionId} unsubscribed from story: {StoryId}", 
+            Context.ConnectionId, storyId);
     }
 
     /// <summary>
@@ -78,23 +78,23 @@ public class PipelineHub : Hub
 /// </summary>
 public interface IPipelineNotificationService
 {
-    Task NotifyPhaseStartedAsync(string requirementId, PipelinePhase phase, string message);
-    Task NotifyPhaseCompletedAsync(string requirementId, PipelinePhase phase, string message, object? result = null);
-    Task NotifyPhasePendingApprovalAsync(string requirementId, PipelinePhase phase, string message, object? data = null);
-    Task NotifyPhaseFailedAsync(string requirementId, PipelinePhase phase, string error);
-    Task NotifyProgressAsync(string requirementId, string message, int? progress = null);
-    Task NotifyPipelineCompletedAsync(string requirementId, string outputPath);
-    Task NotifyRequirementListChangedAsync();
+    Task NotifyPhaseStartedAsync(string storyId, PipelinePhase phase, string message);
+    Task NotifyPhaseCompletedAsync(string storyId, PipelinePhase phase, string message, object? result = null);
+    Task NotifyPhasePendingApprovalAsync(string storyId, PipelinePhase phase, string message, object? data = null);
+    Task NotifyPhaseFailedAsync(string storyId, PipelinePhase phase, string error);
+    Task NotifyProgressAsync(string storyId, string message, int? progress = null);
+    Task NotifyPipelineCompletedAsync(string storyId, string outputPath);
+    Task NotifyStoryListChangedAsync();
     
     // Retry and Fix Task notifications
-    Task NotifyRetryRequiredAsync(string requirementId, PipelinePhase failedPhase, RetryInfoDto retryInfo);
-    Task NotifyFixTasksGeneratedAsync(string requirementId, List<FixTaskDto> fixTasks);
-    Task NotifyTestResultsAsync(string requirementId, TestSummaryDto testSummary);
-    Task NotifyRetryStartingAsync(string requirementId, int attempt, int maxAttempts, PipelinePhase targetPhase);
+    Task NotifyRetryRequiredAsync(string storyId, PipelinePhase failedPhase, RetryInfoDto retryInfo);
+    Task NotifyFixTasksGeneratedAsync(string storyId, List<FixTaskDto> fixTasks);
+    Task NotifyTestResultsAsync(string storyId, TestSummaryDto testSummary);
+    Task NotifyRetryStartingAsync(string storyId, int attempt, int maxAttempts, PipelinePhase targetPhase);
     
     // LLM call notifications
-    Task NotifyLLMCallStartingAsync(string requirementId, LLMCallInfo callInfo);
-    Task NotifyLLMCallCompletedAsync(string requirementId, LLMCallResult result);
+    Task NotifyLLMCallStartingAsync(string storyId, LLMCallInfo callInfo);
+    Task NotifyLLMCallCompletedAsync(string storyId, LLMCallResult result);
 }
 
 /// <summary>
@@ -113,117 +113,117 @@ public class SignalRPipelineNotificationService : IPipelineNotificationService
         _logger = logger;
     }
 
-    public async Task NotifyPhaseStartedAsync(string requirementId, PipelinePhase phase, string message)
+    public async Task NotifyPhaseStartedAsync(string storyId, PipelinePhase phase, string message)
     {
-        var update = CreateUpdate(requirementId, "PhaseStarted", phase, message);
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Phase started: {Phase} - {Message}", requirementId, phase, message);
+        var update = CreateUpdate(storyId, "PhaseStarted", phase, message);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Phase started: {Phase} - {Message}", storyId, phase, message);
     }
 
-    public async Task NotifyPhaseCompletedAsync(string requirementId, PipelinePhase phase, string message, object? result = null)
+    public async Task NotifyPhaseCompletedAsync(string storyId, PipelinePhase phase, string message, object? result = null)
     {
-        var update = CreateUpdate(requirementId, "PhaseCompleted", phase, message, result);
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Phase completed: {Phase} - {Message}", requirementId, phase, message);
+        var update = CreateUpdate(storyId, "PhaseCompleted", phase, message, result);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Phase completed: {Phase} - {Message}", storyId, phase, message);
     }
 
-    public async Task NotifyPhasePendingApprovalAsync(string requirementId, PipelinePhase phase, string message, object? data = null)
+    public async Task NotifyPhasePendingApprovalAsync(string storyId, PipelinePhase phase, string message, object? data = null)
     {
-        var update = CreateUpdate(requirementId, "PhasePendingApproval", phase, message, data);
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Phase pending approval: {Phase} - {Message}", requirementId, phase, message);
+        var update = CreateUpdate(storyId, "PhasePendingApproval", phase, message, data);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Phase pending approval: {Phase} - {Message}", storyId, phase, message);
     }
 
-    public async Task NotifyPhaseFailedAsync(string requirementId, PipelinePhase phase, string error)
+    public async Task NotifyPhaseFailedAsync(string storyId, PipelinePhase phase, string error)
     {
-        var update = CreateUpdate(requirementId, "PhaseFailed", phase, error);
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogError("[{RequirementId}] Phase failed: {Phase} - {Error}", requirementId, phase, error);
+        var update = CreateUpdate(storyId, "PhaseFailed", phase, error);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogError("[{StoryId}] Phase failed: {Phase} - {Error}", storyId, phase, error);
     }
 
-    public async Task NotifyProgressAsync(string requirementId, string message, int? progress = null)
+    public async Task NotifyProgressAsync(string storyId, string message, int? progress = null)
     {
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "Progress",
             Phase = PipelinePhase.None,
             Message = message,
             Data = progress.HasValue ? new { Progress = progress.Value } : null
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
     }
 
-    public async Task NotifyPipelineCompletedAsync(string requirementId, string outputPath)
+    public async Task NotifyPipelineCompletedAsync(string storyId, string outputPath)
     {
-        var update = CreateUpdate(requirementId, "PipelineCompleted", PipelinePhase.Completed, 
+        var update = CreateUpdate(storyId, "PipelineCompleted", PipelinePhase.Completed, 
             "Pipeline completed successfully", new { OutputPath = outputPath });
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        await _hubContext.Clients.Group("all_updates").SendAsync("RequirementCompleted", requirementId);
-        _logger.LogInformation("[{RequirementId}] Pipeline completed. Output: {OutputPath}", requirementId, outputPath);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        await _hubContext.Clients.Group("all_updates").SendAsync("StoryCompleted", storyId);
+        _logger.LogInformation("[{StoryId}] Pipeline completed. Output: {OutputPath}", storyId, outputPath);
     }
 
-    public async Task NotifyRequirementListChangedAsync()
+    public async Task NotifyStoryListChangedAsync()
     {
-        await _hubContext.Clients.Group("all_updates").SendAsync("RequirementListChanged");
+        await _hubContext.Clients.Group("all_updates").SendAsync("StoryListChanged");
     }
 
-    public async Task NotifyRetryRequiredAsync(string requirementId, PipelinePhase failedPhase, RetryInfoDto retryInfo)
+    public async Task NotifyRetryRequiredAsync(string storyId, PipelinePhase failedPhase, RetryInfoDto retryInfo)
     {
-        var update = CreateUpdate(requirementId, "RetryRequired", failedPhase, 
+        var update = CreateUpdate(storyId, "RetryRequired", failedPhase, 
             $"Retry required: {retryInfo.Reason}. Attempt {retryInfo.CurrentAttempt}/{retryInfo.MaxAttempts}",
             retryInfo);
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Retry required for phase {Phase}: {Reason}", 
-            requirementId, failedPhase, retryInfo.Reason);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Retry required for phase {Phase}: {Reason}", 
+            storyId, failedPhase, retryInfo.Reason);
     }
 
-    public async Task NotifyFixTasksGeneratedAsync(string requirementId, List<FixTaskDto> fixTasks)
+    public async Task NotifyFixTasksGeneratedAsync(string storyId, List<FixTaskDto> fixTasks)
     {
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "FixTasksGenerated",
             Phase = PipelinePhase.None,
             Message = $"{fixTasks.Count} fix task(s) generated",
             Data = fixTasks
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] {Count} fix tasks generated", requirementId, fixTasks.Count);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] {Count} fix tasks generated", storyId, fixTasks.Count);
     }
 
-    public async Task NotifyTestResultsAsync(string requirementId, TestSummaryDto testSummary)
+    public async Task NotifyTestResultsAsync(string storyId, TestSummaryDto testSummary)
     {
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "TestResults",
             Phase = PipelinePhase.UnitTesting,
             Message = $"Tests: {testSummary.Passed}/{testSummary.TotalTests} passed" +
                      (testSummary.IsBreakingChange ? " ⚠️ BREAKING CHANGE!" : ""),
             Data = testSummary
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Test results: {Passed}/{Total} passed, {Failed} failed", 
-            requirementId, testSummary.Passed, testSummary.TotalTests, testSummary.Failed);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Test results: {Passed}/{Total} passed, {Failed} failed", 
+            storyId, testSummary.Passed, testSummary.TotalTests, testSummary.Failed);
     }
 
-    public async Task NotifyRetryStartingAsync(string requirementId, int attempt, int maxAttempts, PipelinePhase targetPhase)
+    public async Task NotifyRetryStartingAsync(string storyId, int attempt, int maxAttempts, PipelinePhase targetPhase)
     {
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "RetryStarting",
             Phase = targetPhase,
             Message = $"Starting retry attempt {attempt}/{maxAttempts}, returning to {targetPhase}",
             Data = new { Attempt = attempt, MaxAttempts = maxAttempts, TargetPhase = targetPhase }
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] Starting retry attempt {Attempt}/{Max} → {Phase}", 
-            requirementId, attempt, maxAttempts, targetPhase);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] Starting retry attempt {Attempt}/{Max} → {Phase}", 
+            storyId, attempt, maxAttempts, targetPhase);
     }
 
-    public async Task NotifyLLMCallStartingAsync(string requirementId, LLMCallInfo callInfo)
+    public async Task NotifyLLMCallStartingAsync(string storyId, LLMCallInfo callInfo)
     {
         var costStr = callInfo.EstimatedCostUSD > 0 
             ? $", Est. Cost: ${callInfo.EstimatedCostUSD:F4}" 
@@ -231,37 +231,37 @@ public class SignalRPipelineNotificationService : IPipelineNotificationService
         
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "LLMCallStarting",
             Phase = PipelinePhase.None,
             Message = $"🤖 LLM Call: {callInfo.AgentName} | ~{callInfo.EstimatedInputTokens:N0} tokens (~{callInfo.EstimatedInputKB} KB){costStr}",
             Data = callInfo
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] LLM Call Starting: {Agent} | ~{Tokens} tokens (~{KB} KB){Cost}", 
-            requirementId, callInfo.AgentName, callInfo.EstimatedInputTokens, callInfo.EstimatedInputKB, costStr);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] LLM Call Starting: {Agent} | ~{Tokens} tokens (~{KB} KB){Cost}", 
+            storyId, callInfo.AgentName, callInfo.EstimatedInputTokens, callInfo.EstimatedInputKB, costStr);
     }
 
-    public async Task NotifyLLMCallCompletedAsync(string requirementId, LLMCallResult result)
+    public async Task NotifyLLMCallCompletedAsync(string storyId, LLMCallResult result)
     {
         var update = new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = "LLMCallCompleted",
             Phase = PipelinePhase.None,
             Message = $"✅ LLM Complete: {result.AgentName} | {result.TotalTokens:N0} tokens (in:{result.PromptTokens:N0}, out:{result.CompletionTokens:N0}) | Cost: ${result.ActualCostUSD:F4} | {result.Duration.TotalSeconds:F1}s",
             Data = result
         };
-        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
-        _logger.LogInformation("[{RequirementId}] LLM Complete: {Agent} | Total: {Total} tokens | Cost: ${Cost:F4} | Duration: {Duration}s", 
-            requirementId, result.AgentName, result.TotalTokens, result.ActualCostUSD, result.Duration.TotalSeconds);
+        await SendToStoryGroupAsync(storyId, "PipelineUpdate", update);
+        _logger.LogInformation("[{StoryId}] LLM Complete: {Agent} | Total: {Total} tokens | Cost: ${Cost:F4} | Duration: {Duration}s", 
+            storyId, result.AgentName, result.TotalTokens, result.ActualCostUSD, result.Duration.TotalSeconds);
     }
 
-    private PipelineUpdateMessage CreateUpdate(string requirementId, string updateType, PipelinePhase phase, string message, object? data = null)
+    private PipelineUpdateMessage CreateUpdate(string storyId, string updateType, PipelinePhase phase, string message, object? data = null)
     {
         return new PipelineUpdateMessage
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             UpdateType = updateType,
             Phase = phase,
             Message = message,
@@ -269,10 +269,10 @@ public class SignalRPipelineNotificationService : IPipelineNotificationService
         };
     }
 
-    private async Task SendToRequirementGroupAsync(string requirementId, string method, object message)
+    private async Task SendToStoryGroupAsync(string storyId, string method, object message)
     {
-        // Send to specific requirement subscribers
-        await _hubContext.Clients.Group($"requirement_{requirementId}").SendAsync(method, message);
+        // Send to specific story subscribers
+        await _hubContext.Clients.Group($"story_{storyId}").SendAsync(method, message);
         
         // Also send to "all updates" subscribers
         await _hubContext.Clients.Group("all_updates").SendAsync(method, message);

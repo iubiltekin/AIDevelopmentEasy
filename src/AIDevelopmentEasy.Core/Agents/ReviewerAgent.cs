@@ -101,9 +101,9 @@ Be thorough but fair. Minor style issues shouldn't block approval if the code wo
                 codebaseSection.AppendLine("```");
             }
 
-            // Get original requirement
-            var requirement = request.ProjectState?.Requirement ?? 
-                              request.Context.GetValueOrDefault("requirement", "Not provided");
+            // Get original story
+            var story = request.ProjectState?.Story ?? 
+                              request.Context.GetValueOrDefault("story", "Not provided");
 
             // Get plan summary
             var planSummary = "";
@@ -119,8 +119,8 @@ Be thorough but fair. Minor style issues shouldn't block approval if the code wo
 
             var userPrompt = $@"Please review the following codebase:
 
-ORIGINAL REQUIREMENT:
-{requirement}
+ORIGINAL STORY:
+{story}
 {planSummary}
 GENERATED CODEBASE:
 {codebaseSection}

@@ -9,37 +9,37 @@ namespace AIDevelopmentEasy.Api.Repositories.Interfaces;
 public interface ITaskRepository
 {
     /// <summary>
-    /// Get all tasks for a requirement
+    /// Get all tasks for a story
     /// </summary>
-    Task<IEnumerable<TaskDto>> GetByRequirementAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<TaskDto>> GetByStoryAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get a single task
     /// </summary>
-    Task<TaskDto?> GetByIdAsync(string requirementId, int taskIndex, CancellationToken cancellationToken = default);
+    Task<TaskDto?> GetByIdAsync(string storyId, int taskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Save tasks for a requirement (replaces existing)
+    /// Save tasks for a story (replaces existing)
     /// </summary>
-    Task SaveTasksAsync(string requirementId, IEnumerable<TaskDto> tasks, CancellationToken cancellationToken = default);
+    Task SaveTasksAsync(string storyId, IEnumerable<TaskDto> tasks, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Append fix tasks to existing tasks (preserves original tasks)
     /// </summary>
-    Task AppendFixTasksAsync(string requirementId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default);
+    Task AppendFixTasksAsync(string storyId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update a single task
     /// </summary>
-    Task UpdateTaskAsync(string requirementId, TaskDto task, CancellationToken cancellationToken = default);
+    Task UpdateTaskAsync(string storyId, TaskDto task, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Delete all tasks for a requirement
+    /// Delete all tasks for a story
     /// </summary>
-    Task DeleteAllAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task DeleteAllAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Check if tasks exist for a requirement
+    /// Check if tasks exist for a story
     /// </summary>
-    Task<bool> HasTasksAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<bool> HasTasksAsync(string storyId, CancellationToken cancellationToken = default);
 }

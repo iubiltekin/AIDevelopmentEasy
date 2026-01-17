@@ -9,34 +9,34 @@ namespace AIDevelopmentEasy.Api.Services.Interfaces;
 public interface IPipelineService
 {
     /// <summary>
-    /// Start processing a requirement
+    /// Start processing a story
     /// </summary>
-    Task<PipelineStatusDto> StartAsync(string requirementId, bool autoApproveAll = false, CancellationToken cancellationToken = default);
+    Task<PipelineStatusDto> StartAsync(string storyId, bool autoApproveAll = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get the current status of a pipeline
     /// </summary>
-    Task<PipelineStatusDto?> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<PipelineStatusDto?> GetStatusAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Approve a phase and continue execution
     /// </summary>
-    Task<bool> ApprovePhaseAsync(string requirementId, PipelinePhase phase, CancellationToken cancellationToken = default);
+    Task<bool> ApprovePhaseAsync(string storyId, PipelinePhase phase, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reject a phase (stop execution)
     /// </summary>
-    Task<bool> RejectPhaseAsync(string requirementId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default);
+    Task<bool> RejectPhaseAsync(string storyId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cancel a running pipeline
     /// </summary>
-    Task CancelAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task CancelAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Check if a pipeline is currently running
     /// </summary>
-    Task<bool> IsRunningAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<bool> IsRunningAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get all running pipelines
@@ -46,10 +46,10 @@ public interface IPipelineService
     /// <summary>
     /// Approve retry with specified action (auto-fix, manual fix, skip, abort)
     /// </summary>
-    Task<bool> ApproveRetryAsync(string requirementId, RetryAction action, CancellationToken cancellationToken = default);
+    Task<bool> ApproveRetryAsync(string storyId, RetryAction action, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get current retry info if any
     /// </summary>
-    Task<RetryInfoDto?> GetRetryInfoAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<RetryInfoDto?> GetRetryInfoAsync(string storyId, CancellationToken cancellationToken = default);
 }

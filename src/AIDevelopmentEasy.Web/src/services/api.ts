@@ -1,7 +1,7 @@
 import type { 
-  RequirementDto, 
+  StoryDto, 
   PipelineStatusDto, 
-  CreateRequirementRequest,
+  CreateStoryRequest,
   PipelinePhase,
   CodebaseDto,
   CreateCodebaseRequest,
@@ -22,37 +22,37 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return text ? JSON.parse(text) : ({} as T);
 }
 
-// Requirements API
-export const requirementsApi = {
-  getAll: async (): Promise<RequirementDto[]> => {
-    const response = await fetch(`${API_BASE}/requirements`);
-    return handleResponse<RequirementDto[]>(response);
+// Stories API
+export const storiesApi = {
+  getAll: async (): Promise<StoryDto[]> => {
+    const response = await fetch(`${API_BASE}/stories`);
+    return handleResponse<StoryDto[]>(response);
   },
 
-  getById: async (id: string): Promise<RequirementDto> => {
-    const response = await fetch(`${API_BASE}/requirements/${id}`);
-    return handleResponse<RequirementDto>(response);
+  getById: async (id: string): Promise<StoryDto> => {
+    const response = await fetch(`${API_BASE}/stories/${id}`);
+    return handleResponse<StoryDto>(response);
   },
 
   getContent: async (id: string): Promise<string> => {
-    const response = await fetch(`${API_BASE}/requirements/${id}/content`);
+    const response = await fetch(`${API_BASE}/stories/${id}/content`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     return response.text(); // Content is plain text, not JSON
   },
 
-  create: async (request: CreateRequirementRequest): Promise<RequirementDto> => {
-    const response = await fetch(`${API_BASE}/requirements`, {
+  create: async (request: CreateStoryRequest): Promise<StoryDto> => {
+    const response = await fetch(`${API_BASE}/stories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
     });
-    return handleResponse<RequirementDto>(response);
+    return handleResponse<StoryDto>(response);
   },
 
   delete: async (id: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/requirements/${id}`, {
+    const response = await fetch(`${API_BASE}/stories/${id}`, {
       method: 'DELETE'
     });
     await handleResponse<void>(response);
@@ -60,14 +60,14 @@ export const requirementsApi = {
 
   reset: async (id: string, clearTasks: boolean = true): Promise<void> => {
     const response = await fetch(
-      `${API_BASE}/requirements/${id}/reset?clearTasks=${clearTasks}`,
+      `${API_BASE}/stories/${id}/reset?clearTasks=${clearTasks}`,
       { method: 'POST' }
     );
     await handleResponse<void>(response);
   },
 
   updateContent: async (id: string, content: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/requirements/${id}/content`, {
+    const response = await fetch(`${API_BASE}/stories/${id}/content`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
@@ -78,8 +78,8 @@ export const requirementsApi = {
 
 // Pipeline API
 export const pipelineApi = {
-  start: async (requirementId: string, autoApproveAll: boolean = false): Promise<PipelineStatusDto> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/start`, {
+  start: async (storyId: string, autoApproveAll: boolean = false): Promise<PipelineStatusDto> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ autoApproveAll })
@@ -87,22 +87,22 @@ export const pipelineApi = {
     return handleResponse<PipelineStatusDto>(response);
   },
 
-  getStatus: async (requirementId: string): Promise<PipelineStatusDto> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/status`);
+  getStatus: async (storyId: string): Promise<PipelineStatusDto> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/status`);
     return handleResponse<PipelineStatusDto>(response);
   },
 
-  approvePhase: async (requirementId: string, phase: PipelinePhase): Promise<void> => {
+  approvePhase: async (storyId: string, phase: PipelinePhase): Promise<void> => {
     const response = await fetch(
-      `${API_BASE}/pipeline/${requirementId}/approve/${phase}`,
+      `${API_BASE}/pipeline/${storyId}/approve/${phase}`,
       { method: 'POST' }
     );
     await handleResponse<void>(response);
   },
 
-  rejectPhase: async (requirementId: string, phase: PipelinePhase, reason?: string): Promise<void> => {
+  rejectPhase: async (storyId: string, phase: PipelinePhase, reason?: string): Promise<void> => {
     const response = await fetch(
-      `${API_BASE}/pipeline/${requirementId}/reject/${phase}`,
+      `${API_BASE}/pipeline/${storyId}/reject/${phase}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -112,9 +112,9 @@ export const pipelineApi = {
     await handleResponse<void>(response);
   },
 
-  cancel: async (requirementId: string): Promise<void> => {
+  cancel: async (storyId: string): Promise<void> => {
     const response = await fetch(
-      `${API_BASE}/pipeline/${requirementId}/cancel`,
+      `${API_BASE}/pipeline/${storyId}/cancel`,
       { method: 'POST' }
     );
     await handleResponse<void>(response);
@@ -125,19 +125,19 @@ export const pipelineApi = {
     return handleResponse<string[]>(response);
   },
 
-  getOutput: async (requirementId: string): Promise<Record<string, string>> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/output`);
+  getOutput: async (storyId: string): Promise<Record<string, string>> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/output`);
     return handleResponse<Record<string, string>>(response);
   },
 
-  getReviewReport: async (requirementId: string): Promise<string> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/review`);
+  getReviewReport: async (storyId: string): Promise<string> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/review`);
     return handleResponse<string>(response);
   },
 
   // Retry endpoints
-  approveRetry: async (requirementId: string, action: RetryAction): Promise<void> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/retry`, {
+  approveRetry: async (storyId: string, action: RetryAction): Promise<void> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/retry`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action })
@@ -145,14 +145,14 @@ export const pipelineApi = {
     await handleResponse<void>(response);
   },
 
-  getRetryInfo: async (requirementId: string): Promise<RetryInfoDto | null> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/retry`);
+  getRetryInfo: async (storyId: string): Promise<RetryInfoDto | null> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/retry`);
     return handleResponse<RetryInfoDto | null>(response);
   },
 
   // History endpoint - get completed pipeline details
-  getHistory: async (requirementId: string): Promise<PipelineStatusDto | null> => {
-    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/history`);
+  getHistory: async (storyId: string): Promise<PipelineStatusDto | null> => {
+    const response = await fetch(`${API_BASE}/pipeline/${storyId}/history`);
     if (response.status === 404) {
       return null;
     }

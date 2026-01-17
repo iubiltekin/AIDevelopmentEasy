@@ -4,57 +4,57 @@ namespace AIDevelopmentEasy.Api.Repositories.Interfaces;
 
 /// <summary>
 /// Repository interface for approval state management.
-/// Tracks which phases have been approved for each requirement.
+/// Tracks which phases have been approved for each story.
 /// </summary>
 public interface IApprovalRepository
 {
     /// <summary>
-    /// Check if a requirement's plan has been approved
+    /// Check if a story's plan has been approved
     /// </summary>
-    Task<bool> IsPlanApprovedAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<bool> IsPlanApprovedAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Approve the plan for a requirement
+    /// Approve the plan for a story
     /// </summary>
-    Task ApprovePlanAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task ApprovePlanAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Check if a requirement is marked as completed
+    /// Check if a story is marked as completed
     /// </summary>
-    Task<bool> IsCompletedAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<bool> IsCompletedAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark a requirement as completed
+    /// Mark a story as completed
     /// </summary>
-    Task MarkCompletedAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task MarkCompletedAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Check if a requirement is in progress
+    /// Check if a story is in progress
     /// </summary>
-    Task<bool> IsInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<bool> IsInProgressAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark a requirement as in progress
+    /// Mark a story as in progress
     /// </summary>
-    Task MarkInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task MarkInProgressAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reset in progress state
     /// </summary>
-    Task ResetInProgressAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task ResetInProgressAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reset approval state (to reprocess)
     /// </summary>
-    Task ResetApprovalAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task ResetApprovalAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reset completion state (to reprocess)
     /// </summary>
-    Task ResetCompletionAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task ResetCompletionAsync(string storyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get the current status of a requirement based on approval/completion state
+    /// Get the current status of a story based on approval/completion state
     /// </summary>
-    Task<RequirementStatus> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default);
+    Task<StoryStatus> GetStatusAsync(string storyId, CancellationToken cancellationToken = default);
 }

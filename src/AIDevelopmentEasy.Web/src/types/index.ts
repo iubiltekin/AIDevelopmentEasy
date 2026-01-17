@@ -1,10 +1,10 @@
 // API Types matching the backend models
 
-export enum RequirementType {
+export enum StoryType {
   Single = 0
 }
 
-export enum RequirementStatus {
+export enum StoryStatus {
   NotStarted = 0,
   Planned = 1,
   Approved = 2,
@@ -66,12 +66,12 @@ export interface TaskDto {
   existingCode?: string;     // existing code content for fix tasks (preserved before rollback)
 }
 
-export interface RequirementDto {
+export interface StoryDto {
   id: string;
   name: string;
   content: string;
-  type?: RequirementType;  // Optional for backward compatibility
-  status: RequirementStatus;
+  type?: StoryType;  // Optional for backward compatibility
+  status: StoryStatus;
   codebaseId?: string;
   createdAt: string;
   lastProcessedAt?: string;
@@ -88,7 +88,7 @@ export interface PhaseStatusDto {
 }
 
 export interface PipelineStatusDto {
-  requirementId: string;
+  storyId: string;
   currentPhase: PipelinePhase;
   isRunning: boolean;
   phases: PhaseStatusDto[];
@@ -168,7 +168,7 @@ export interface RetryInfoDto {
 }
 
 export interface PipelineUpdateMessage {
-  requirementId: string;
+  storyId: string;
   updateType: string;
   phase: PipelinePhase;
   message: string;
@@ -176,10 +176,10 @@ export interface PipelineUpdateMessage {
   timestamp: string;
 }
 
-export interface CreateRequirementRequest {
+export interface CreateStoryRequest {
   name: string;
   content: string;
-  type?: RequirementType;  // Optional, defaults to Single
+  type?: StoryType;  // Optional, defaults to Single
   codebaseId?: string;
 }
 
@@ -252,26 +252,26 @@ export function getCodebaseStatusColor(status: CodebaseStatus): string {
 }
 
 // Helper functions
-export function getStatusLabel(status: RequirementStatus): string {
-  const labels: Record<RequirementStatus, string> = {
-    [RequirementStatus.NotStarted]: 'Not Started',
-    [RequirementStatus.Planned]: 'Planned',
-    [RequirementStatus.Approved]: 'Approved',
-    [RequirementStatus.InProgress]: 'In Progress',
-    [RequirementStatus.Completed]: 'Completed',
-    [RequirementStatus.Failed]: 'Failed'
+export function getStatusLabel(status: StoryStatus): string {
+  const labels: Record<StoryStatus, string> = {
+    [StoryStatus.NotStarted]: 'Not Started',
+    [StoryStatus.Planned]: 'Planned',
+    [StoryStatus.Approved]: 'Approved',
+    [StoryStatus.InProgress]: 'In Progress',
+    [StoryStatus.Completed]: 'Completed',
+    [StoryStatus.Failed]: 'Failed'
   };
   return labels[status] || 'Unknown';
 }
 
-export function getStatusColor(status: RequirementStatus): string {
-  const colors: Record<RequirementStatus, string> = {
-    [RequirementStatus.NotStarted]: 'bg-slate-500',
-    [RequirementStatus.Planned]: 'bg-blue-500',
-    [RequirementStatus.Approved]: 'bg-emerald-500',
-    [RequirementStatus.InProgress]: 'bg-amber-500',
-    [RequirementStatus.Completed]: 'bg-green-500',
-    [RequirementStatus.Failed]: 'bg-red-500'
+export function getStatusColor(status: StoryStatus): string {
+  const colors: Record<StoryStatus, string> = {
+    [StoryStatus.NotStarted]: 'bg-slate-500',
+    [StoryStatus.Planned]: 'bg-blue-500',
+    [StoryStatus.Approved]: 'bg-emerald-500',
+    [StoryStatus.InProgress]: 'bg-amber-500',
+    [StoryStatus.Completed]: 'bg-green-500',
+    [StoryStatus.Failed]: 'bg-red-500'
   };
   return colors[status] || 'bg-slate-500';
 }
@@ -297,7 +297,7 @@ export function getPhaseDescription(phase: PipelinePhase): string {
   const descriptions: Record<PipelinePhase, string> = {
     [PipelinePhase.None]: '',
     [PipelinePhase.Analysis]: 'CodeAnalysisAgent analyzing codebase structure and references',
-    [PipelinePhase.Planning]: 'PlannerAgent decomposing requirements into tasks',
+    [PipelinePhase.Planning]: 'PlannerAgent decomposing story into tasks',
     [PipelinePhase.Coding]: 'CoderAgent generating or modifying code',
     [PipelinePhase.Debugging]: 'DebuggerAgent verifying and fixing code',
     [PipelinePhase.Reviewing]: 'ReviewerAgent checking code quality',

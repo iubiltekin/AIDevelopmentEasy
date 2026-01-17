@@ -8,7 +8,7 @@ export function useSignalR() {
   const connectionRef = useRef<signalR.HubConnection | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<PipelineUpdateMessage | null>(null);
-  const [requirementListChanged, setRequirementListChanged] = useState(0);
+  const [storyListChanged, setStoryListChanged] = useState(0);
 
   useEffect(() => {
     const connection = new signalR.HubConnectionBuilder()
@@ -24,14 +24,14 @@ export function useSignalR() {
       setLastUpdate(message);
     });
 
-    connection.on('RequirementListChanged', () => {
-      console.log('Requirement list changed');
-      setRequirementListChanged(prev => prev + 1);
+    connection.on('StoryListChanged', () => {
+      console.log('Story list changed');
+      setStoryListChanged(prev => prev + 1);
     });
 
-    connection.on('RequirementCompleted', (requirementId: string) => {
-      console.log('Requirement completed:', requirementId);
-      setRequirementListChanged(prev => prev + 1);
+    connection.on('StoryCompleted', (storyId: string) => {
+      console.log('Story completed:', storyId);
+      setStoryListChanged(prev => prev + 1);
     });
 
     connection.onclose(() => {
@@ -56,23 +56,23 @@ export function useSignalR() {
     };
   }, []);
 
-  const subscribeToRequirement = useCallback(async (requirementId: string) => {
+  const subscribeToStory = useCallback(async (storyId: string) => {
     if (connectionRef.current?.state === signalR.HubConnectionState.Connected) {
-      await connectionRef.current.invoke('SubscribeToRequirement', requirementId);
+      await connectionRef.current.invoke('SubscribeToStory', storyId);
     }
   }, []);
 
-  const unsubscribeFromRequirement = useCallback(async (requirementId: string) => {
+  const unsubscribeFromStory = useCallback(async (storyId: string) => {
     if (connectionRef.current?.state === signalR.HubConnectionState.Connected) {
-      await connectionRef.current.invoke('UnsubscribeFromRequirement', requirementId);
+      await connectionRef.current.invoke('UnsubscribeFromStory', storyId);
     }
   }, []);
 
   return {
     isConnected,
     lastUpdate,
-    requirementListChanged,
-    subscribeToRequirement,
-    unsubscribeFromRequirement
+    storyListChanged,
+    subscribeToStory,
+    unsubscribeFromStory
   };
 }

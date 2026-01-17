@@ -86,9 +86,9 @@ public class ProjectState
     public string ProjectName { get; set; } = string.Empty;
     
     /// <summary>
-    /// Original user requirement
+    /// Original user story
     /// </summary>
-    public string Requirement { get; set; } = string.Empty;
+    public string Story { get; set; } = string.Empty;
     
     /// <summary>
     /// Coding standards and conventions (JSON string)

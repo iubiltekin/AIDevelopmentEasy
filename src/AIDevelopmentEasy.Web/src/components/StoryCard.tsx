@@ -1,19 +1,19 @@
 import { Link } from 'react-router-dom';
 import { FileText, Play, RotateCcw, Trash2, Database } from 'lucide-react';
-import { RequirementDto, RequirementStatus } from '../types';
+import { StoryDto, StoryStatus } from '../types';
 import { StatusBadge } from './StatusBadge';
 
-interface RequirementCardProps {
-  requirement: RequirementDto;
+interface StoryCardProps {
+  story: StoryDto;
   onStart: (id: string) => void;
   onReset: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-export function RequirementCard({ requirement, onStart, onReset, onDelete }: RequirementCardProps) {
-  const isCompleted = requirement.status === RequirementStatus.Completed;
-  const isRunning = requirement.status === RequirementStatus.InProgress;
-  const canStart = !isRunning && requirement.status !== RequirementStatus.Completed;
+export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps) {
+  const isCompleted = story.status === StoryStatus.Completed;
+  const isRunning = story.status === StoryStatus.InProgress;
+  const canStart = !isRunning && story.status !== StoryStatus.Completed;
 
   return (
     <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-5 hover:border-blue-500/50 transition-all duration-300 animate-slide-in">
@@ -24,12 +24,12 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
           </div>
           <div>
             <Link 
-              to={`/requirements/${requirement.id}`}
+              to={`/stories/${story.id}`}
               className="text-lg font-semibold text-white hover:text-blue-400 transition-colors"
             >
-              {requirement.name}
+              {story.name}
             </Link>
-            {requirement.codebaseId && (
+            {story.codebaseId && (
               <div className="flex items-center gap-1 text-xs text-emerald-400 mt-0.5">
                 <Database className="w-3 h-3" />
                 With codebase context
@@ -37,19 +37,19 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
             )}
           </div>
         </div>
-        <StatusBadge status={requirement.status} />
+        <StatusBadge status={story.status} />
       </div>
 
-      {requirement.tasks.length > 0 && (
+      {story.tasks.length > 0 && (
         <div className="mb-4 text-sm text-slate-400">
-          {requirement.tasks.length} task{requirement.tasks.length !== 1 ? 's' : ''} generated
+          {story.tasks.length} task{story.tasks.length !== 1 ? 's' : ''} generated
         </div>
       )}
 
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700">
         {canStart && (
           <button
-            onClick={() => onStart(requirement.id)}
+            onClick={() => onStart(story.id)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
             <Play className="w-4 h-4" />
@@ -59,7 +59,7 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
         
         {isRunning && (
           <Link
-            to={`/pipeline/${requirement.id}`}
+            to={`/pipeline/${story.id}`}
             className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
             <span className="animate-spin">🔄</span>
@@ -69,7 +69,7 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
 
         {isCompleted && (
           <Link
-            to={`/requirements/${requirement.id}`}
+            to={`/stories/${story.id}`}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
             View Output
@@ -77,7 +77,7 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
         )}
 
         <button
-          onClick={() => onReset(requirement.id)}
+          onClick={() => onReset(story.id)}
           className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
           title="Reset"
         >
@@ -85,7 +85,7 @@ export function RequirementCard({ requirement, onStart, onReset, onDelete }: Req
         </button>
 
         <button
-          onClick={() => onDelete(requirement.id)}
+          onClick={() => onDelete(story.id)}
           className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg transition-colors"
           title="Delete"
         >

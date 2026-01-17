@@ -1,9 +1,9 @@
 namespace AIDevelopmentEasy.CLI.Models;
 
 /// <summary>
-/// Requirement file information with processing status
+/// Story file information with processing status
 /// </summary>
-public class RequirementInfo
+public class StoryInfo
 {
     public string FilePath { get; init; } = string.Empty;
     public string FileName => Path.GetFileName(FilePath);

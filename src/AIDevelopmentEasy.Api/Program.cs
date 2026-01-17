@@ -67,14 +67,14 @@ builder.Host.UseSerilog();
 var programDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
 var appDataDir = Path.Combine(programDataDir, "AIDevelopmentEasy");
 
-var requirementsPath = Path.Combine(appDataDir, "requirements");
+var storiesPath = Path.Combine(appDataDir, "stories");
 var outputPath = Path.Combine(appDataDir, "output");
 var promptsPath = Path.Combine(appDataDir, "prompts");
 var codebasesPath = Path.Combine(appDataDir, "codebases");
 
 // Ensure all directories exist
 Directory.CreateDirectory(appDataDir);
-Directory.CreateDirectory(requirementsPath);
+Directory.CreateDirectory(storiesPath);
 Directory.CreateDirectory(outputPath);
 Directory.CreateDirectory(promptsPath);
 Directory.CreateDirectory(codebasesPath);
@@ -135,17 +135,17 @@ builder.Services.AddSwaggerGen(c =>
 
 // Repositories (File-based - can be swapped for DB implementations)
 builder.Services.AddSingleton<IApprovalRepository>(sp =>
-    new FileSystemApprovalRepository(requirementsPath, sp.GetRequiredService<ILogger<FileSystemApprovalRepository>>()));
+    new FileSystemApprovalRepository(storiesPath, sp.GetRequiredService<ILogger<FileSystemApprovalRepository>>()));
 
 builder.Services.AddSingleton<ITaskRepository>(sp =>
-    new FileSystemTaskRepository(requirementsPath, sp.GetRequiredService<ILogger<FileSystemTaskRepository>>()));
+    new FileSystemTaskRepository(storiesPath, sp.GetRequiredService<ILogger<FileSystemTaskRepository>>()));
 
-builder.Services.AddSingleton<IRequirementRepository>(sp =>
-    new FileSystemRequirementRepository(
-        requirementsPath,
+builder.Services.AddSingleton<IStoryRepository>(sp =>
+    new FileSystemStoryRepository(
+        storiesPath,
         sp.GetRequiredService<IApprovalRepository>(),
         sp.GetRequiredService<ITaskRepository>(),
-        sp.GetRequiredService<ILogger<FileSystemRequirementRepository>>()));
+        sp.GetRequiredService<ILogger<FileSystemStoryRepository>>()));
 
 builder.Services.AddSingleton<IOutputRepository>(sp =>
     new FileSystemOutputRepository(outputPath, sp.GetRequiredService<ILogger<FileSystemOutputRepository>>()));
@@ -225,7 +225,7 @@ Log.Information("═════════════════════
 Log.Information("  AIDevelopmentEasy Service Started");
 Log.Information("════════════════════════════════════════════════════════════");
 Log.Information("  Mode: {Mode}", WindowsServiceHelpers.IsWindowsService() ? "Windows Service" : "Console");
-Log.Information("  Requirements: {Path}", requirementsPath);
+Log.Information("  Stories: {Path}", storiesPath);
 Log.Information("  Codebases: {Path}", codebasesPath);
 Log.Information("  Output: {Path}", outputPath);
 Log.Information("  API: /swagger");

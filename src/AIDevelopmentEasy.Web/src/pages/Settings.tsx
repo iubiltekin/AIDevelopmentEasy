@@ -378,7 +378,7 @@ export function Settings() {
             </p>
             <p>
               It uses multiple specialized AI agents (Planner, Coder, Debugger, Reviewer) 
-              to process requirements and generate high-quality code.
+              to process stories and generate high-quality code.
             </p>
             <div className="pt-4 border-t border-slate-700">
               <p className="text-sm">

@@ -5,43 +5,43 @@ using AIDevelopmentEasy.Api.Repositories.Interfaces;
 namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
 
 /// <summary>
-/// File system based implementation of IRequirementRepository.
-/// Requirements are stored as .md, .txt, or .json files in the requirements directory.
+/// File system based implementation of IStoryRepository.
+/// Stories are stored as .md, .txt, or .json files in the stories directory.
 /// </summary>
-public class FileSystemRequirementRepository : IRequirementRepository
+public class FileSystemStoryRepository : IStoryRepository
 {
-    private readonly string _requirementsPath;
+    private readonly string _storiesPath;
     private readonly IApprovalRepository _approvalRepository;
     private readonly ITaskRepository _taskRepository;
-    private readonly ILogger<FileSystemRequirementRepository> _logger;
+    private readonly ILogger<FileSystemStoryRepository> _logger;
 
     private static readonly string[] SupportedExtensions = { ".json", ".md", ".txt" };
 
-    public FileSystemRequirementRepository(
-        string requirementsPath,
+    public FileSystemStoryRepository(
+        string storiesPath,
         IApprovalRepository approvalRepository,
         ITaskRepository taskRepository,
-        ILogger<FileSystemRequirementRepository> logger)
+        ILogger<FileSystemStoryRepository> logger)
     {
-        _requirementsPath = requirementsPath;
+        _storiesPath = storiesPath;
         _approvalRepository = approvalRepository;
         _taskRepository = taskRepository;
         _logger = logger;
 
-        if (!Directory.Exists(_requirementsPath))
+        if (!Directory.Exists(_storiesPath))
         {
-            Directory.CreateDirectory(_requirementsPath);
+            Directory.CreateDirectory(_storiesPath);
         }
     }
 
-    public async Task<IEnumerable<RequirementDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StoryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var requirements = new List<RequirementDto>();
+        var stories = new List<StoryDto>();
 
-        if (!Directory.Exists(_requirementsPath))
-            return requirements;
+        if (!Directory.Exists(_storiesPath))
+            return stories;
 
-        var files = Directory.GetFiles(_requirementsPath)
+        var files = Directory.GetFiles(_storiesPath)
             .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLower()))
             .OrderBy(f => f);
 
@@ -49,47 +49,47 @@ public class FileSystemRequirementRepository : IRequirementRepository
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var requirement = await CreateRequirementDtoFromFile(file, cancellationToken);
-            if (requirement != null)
+            var story = await CreateStoryDtoFromFile(file, cancellationToken);
+            if (story != null)
             {
-                requirements.Add(requirement);
+                stories.Add(story);
             }
         }
 
-        return requirements;
+        return stories;
     }
 
-    public async Task<RequirementDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
+    public async Task<StoryDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
-        var filePath = FindRequirementFile(id);
+        var filePath = FindStoryFile(id);
         if (filePath == null)
             return null;
 
-        return await CreateRequirementDtoFromFile(filePath, cancellationToken);
+        return await CreateStoryDtoFromFile(filePath, cancellationToken);
     }
 
     public async Task<string?> GetContentAsync(string id, CancellationToken cancellationToken = default)
     {
-        var filePath = FindRequirementFile(id);
+        var filePath = FindStoryFile(id);
         if (filePath == null)
             return null;
 
         return await File.ReadAllTextAsync(filePath, cancellationToken);
     }
 
-    public async Task<RequirementDto> CreateAsync(string name, string content, RequirementType type, string? codebaseId = null, CancellationToken cancellationToken = default)
+    public async Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, CancellationToken cancellationToken = default)
     {
-        // All requirements are now single-project type (stored as .md)
+        // All stories are now single-project type (stored as .md)
         var extension = ".md";
         var fileName = SanitizeFileName(name) + extension;
-        var filePath = Path.Combine(_requirementsPath, fileName);
+        var filePath = Path.Combine(_storiesPath, fileName);
 
         // Ensure unique filename
         var counter = 1;
         while (File.Exists(filePath))
         {
             fileName = $"{SanitizeFileName(name)}_{counter}{extension}";
-            filePath = Path.Combine(_requirementsPath, fileName);
+            filePath = Path.Combine(_storiesPath, fileName);
             counter++;
         }
 
@@ -103,41 +103,41 @@ public class FileSystemRequirementRepository : IRequirementRepository
             await SaveCodebaseIdAsync(id, codebaseId, cancellationToken);
         }
 
-        _logger.LogInformation("Created requirement file: {FilePath} (codebaseId: {CodebaseId})", filePath, codebaseId ?? "none");
+        _logger.LogInformation("Created story file: {FilePath} (codebaseId: {CodebaseId})", filePath, codebaseId ?? "none");
 
-        return new RequirementDto
+        return new StoryDto
         {
             Id = id,
             Name = id,
             Content = content,
             Type = type,
-            Status = RequirementStatus.NotStarted,
+            Status = StoryStatus.NotStarted,
             CodebaseId = codebaseId,
             CreatedAt = DateTime.UtcNow
         };
     }
 
     /// <summary>
-    /// Save codebase ID for a requirement in a metadata file
+    /// Save codebase ID for a story in a metadata file
     /// </summary>
-    private async Task SaveCodebaseIdAsync(string requirementId, string codebaseId, CancellationToken cancellationToken)
+    private async Task SaveCodebaseIdAsync(string storyId, string codebaseId, CancellationToken cancellationToken)
     {
-        var metadataDir = Path.Combine(_requirementsPath, requirementId);
+        var metadataDir = Path.Combine(_storiesPath, storyId);
         Directory.CreateDirectory(metadataDir);
         
         var metadataPath = Path.Combine(metadataDir, "metadata.json");
-        var metadata = new RequirementMetadata { CodebaseId = codebaseId };
+        var metadata = new StoryMetadata { CodebaseId = codebaseId };
         
         var json = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(metadataPath, json, cancellationToken);
     }
 
     /// <summary>
-    /// Load codebase ID for a requirement from metadata file
+    /// Load codebase ID for a story from metadata file
     /// </summary>
-    private async Task<string?> LoadCodebaseIdAsync(string requirementId, CancellationToken cancellationToken)
+    private async Task<string?> LoadCodebaseIdAsync(string storyId, CancellationToken cancellationToken)
     {
-        var metadataPath = Path.Combine(_requirementsPath, requirementId, "metadata.json");
+        var metadataPath = Path.Combine(_storiesPath, storyId, "metadata.json");
         
         if (!File.Exists(metadataPath))
             return null;
@@ -145,47 +145,47 @@ public class FileSystemRequirementRepository : IRequirementRepository
         try
         {
             var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
-            var metadata = JsonSerializer.Deserialize<RequirementMetadata>(json);
+            var metadata = JsonSerializer.Deserialize<StoryMetadata>(json);
             return metadata?.CodebaseId;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load metadata for requirement: {Id}", requirementId);
+            _logger.LogWarning(ex, "Failed to load metadata for story: {Id}", storyId);
             return null;
         }
     }
 
     /// <summary>
-    /// Metadata stored alongside requirement
+    /// Metadata stored alongside story
     /// </summary>
-    private class RequirementMetadata
+    private class StoryMetadata
     {
         public string? CodebaseId { get; set; }
     }
 
-    public async Task UpdateStatusAsync(string id, RequirementStatus status, CancellationToken cancellationToken = default)
+    public async Task UpdateStatusAsync(string id, StoryStatus status, CancellationToken cancellationToken = default)
     {
         // Status is managed through approval repository, this is for future database implementations
         switch (status)
         {
-            case RequirementStatus.InProgress:
+            case StoryStatus.InProgress:
                 await _approvalRepository.MarkInProgressAsync(id, cancellationToken);
                 break;
-            case RequirementStatus.Approved:
+            case StoryStatus.Approved:
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 await _approvalRepository.ApprovePlanAsync(id, cancellationToken);
                 break;
-            case RequirementStatus.Completed:
+            case StoryStatus.Completed:
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 await _approvalRepository.MarkCompletedAsync(id, cancellationToken);
                 break;
-            case RequirementStatus.Failed:
+            case StoryStatus.Failed:
                 // Reset in-progress flag so it shows as failed, not running
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
                 // Save failed status to metadata file
                 await SaveFailedStatusAsync(id, cancellationToken);
                 break;
-            case RequirementStatus.NotStarted:
+            case StoryStatus.NotStarted:
                 await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
                 await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
@@ -197,7 +197,7 @@ public class FileSystemRequirementRepository : IRequirementRepository
 
     private async Task SaveFailedStatusAsync(string id, CancellationToken cancellationToken)
     {
-        var folderPath = Path.Combine(_requirementsPath, id);
+        var folderPath = Path.Combine(_storiesPath, id);
         if (!Directory.Exists(folderPath))
             Directory.CreateDirectory(folderPath);
 
@@ -207,7 +207,7 @@ public class FileSystemRequirementRepository : IRequirementRepository
 
     private Task ClearFailedStatusAsync(string id, CancellationToken cancellationToken)
     {
-        var failedFile = Path.Combine(_requirementsPath, id, ".failed");
+        var failedFile = Path.Combine(_storiesPath, id, ".failed");
         if (File.Exists(failedFile))
         {
             File.Delete(failedFile);
@@ -217,51 +217,51 @@ public class FileSystemRequirementRepository : IRequirementRepository
 
     public async Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default)
     {
-        var filePath = FindRequirementFile(id);
+        var filePath = FindStoryFile(id);
         if (filePath == null)
             return false;
 
         await File.WriteAllTextAsync(filePath, content, cancellationToken);
-        _logger.LogInformation("Updated requirement content: {Id}", id);
+        _logger.LogInformation("Updated story content: {Id}", id);
         return true;
     }
 
     public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
-        var filePath = FindRequirementFile(id);
+        var filePath = FindStoryFile(id);
         if (filePath == null)
             return Task.FromResult(false);
 
         File.Delete(filePath);
 
         // Also delete associated folder
-        var folderPath = Path.Combine(_requirementsPath, id);
+        var folderPath = Path.Combine(_storiesPath, id);
         if (Directory.Exists(folderPath))
         {
             Directory.Delete(folderPath, recursive: true);
         }
 
-        _logger.LogInformation("Deleted requirement: {Id}", id);
+        _logger.LogInformation("Deleted story: {Id}", id);
         return Task.FromResult(true);
     }
 
     public Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(FindRequirementFile(id) != null);
+        return Task.FromResult(FindStoryFile(id) != null);
     }
 
-    private string? FindRequirementFile(string id)
+    private string? FindStoryFile(string id)
     {
         foreach (var ext in SupportedExtensions)
         {
-            var path = Path.Combine(_requirementsPath, id + ext);
+            var path = Path.Combine(_storiesPath, id + ext);
             if (File.Exists(path))
                 return path;
         }
         return null;
     }
 
-    private async Task<RequirementDto?> CreateRequirementDtoFromFile(string filePath, CancellationToken cancellationToken)
+    private async Task<StoryDto?> CreateStoryDtoFromFile(string filePath, CancellationToken cancellationToken)
     {
         try
         {
@@ -270,29 +270,29 @@ public class FileSystemRequirementRepository : IRequirementRepository
             var extension = Path.GetExtension(filePath).ToLower();
             var content = await File.ReadAllTextAsync(filePath, cancellationToken);
 
-            // All requirements are now single-project type
-            var type = RequirementType.Single;
+            // All stories are now single-project type
+            var type = StoryType.Single;
             var status = await _approvalRepository.GetStatusAsync(id, cancellationToken);
             var hasTasks = await _taskRepository.HasTasksAsync(id, cancellationToken);
 
             // Check if failed (overrides other statuses)
-            var failedFile = Path.Combine(_requirementsPath, id, ".failed");
+            var failedFile = Path.Combine(_storiesPath, id, ".failed");
             if (File.Exists(failedFile))
             {
-                status = RequirementStatus.Failed;
+                status = StoryStatus.Failed;
             }
             // Adjust status based on tasks
-            else if (status == RequirementStatus.NotStarted && hasTasks)
+            else if (status == StoryStatus.NotStarted && hasTasks)
             {
-                status = RequirementStatus.Planned;
+                status = StoryStatus.Planned;
             }
 
-            var tasks = await _taskRepository.GetByRequirementAsync(id, cancellationToken);
+            var tasks = await _taskRepository.GetByStoryAsync(id, cancellationToken);
             
             // Load codebaseId from metadata
             var codebaseId = await LoadCodebaseIdAsync(id, cancellationToken);
 
-            return new RequirementDto
+            return new StoryDto
             {
                 Id = id,
                 Name = id,
@@ -307,7 +307,7 @@ public class FileSystemRequirementRepository : IRequirementRepository
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reading requirement file: {FilePath}", filePath);
+            _logger.LogError(ex, "Error reading story file: {FilePath}", filePath);
             return null;
         }
     }

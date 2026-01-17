@@ -28,7 +28,7 @@ import {
 
 // ============================================
 // Shared Pipeline History Summary Component
-// Used by both PipelineStatus (completed view) and RequirementDetail (history modal)
+// Used by both PipelineStatus (completed view) and StoryDetail (history modal)
 // ============================================
 
 interface PipelineHistorySummaryProps {

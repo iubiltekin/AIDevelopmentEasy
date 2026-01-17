@@ -125,7 +125,7 @@ set SERVICE_DESC=AI-powered software development automation service
 
 :: Create data directories
 set DATA_DIR=%ProgramData%\AIDevelopmentEasy
-mkdir "%DATA_DIR%\requirements" 2>nul
+mkdir "%DATA_DIR%\stories" 2>nul
 mkdir "%DATA_DIR%\output" 2>nul
 mkdir "%DATA_DIR%\prompts" 2>nul
 mkdir "%DATA_DIR%\codebases" 2>nul

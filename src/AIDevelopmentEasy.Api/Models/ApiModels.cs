@@ -1,15 +1,15 @@
 namespace AIDevelopmentEasy.Api.Models;
 
 /// <summary>
-/// Requirement information for API responses
+/// Story information for API responses
 /// </summary>
-public class RequirementDto
+public class StoryDto
 {
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
-    public RequirementType Type { get; set; }
-    public RequirementStatus Status { get; set; }
+    public StoryType Type { get; set; }
+    public StoryStatus Status { get; set; }
     public string? CodebaseId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? LastProcessedAt { get; set; }
@@ -87,7 +87,7 @@ public class TaskDto
 /// </summary>
 public class PipelineStatusDto
 {
-    public string RequirementId { get; set; } = string.Empty;
+    public string StoryId { get; set; } = string.Empty;
     public PipelinePhase CurrentPhase { get; set; }
     public bool IsRunning { get; set; }
     public List<PhaseStatusDto> Phases { get; set; } = new();
@@ -119,9 +119,9 @@ public class PhaseStatusDto
 }
 
 /// <summary>
-/// Request to process a requirement
+/// Request to process a story
 /// </summary>
-public class ProcessRequirementRequest
+public class ProcessStoryRequest
 {
     public bool AutoApproveAll { get; set; } = false;
 }
@@ -140,7 +140,7 @@ public class ApprovePhaseRequest
 /// </summary>
 public class PipelineUpdateMessage
 {
-    public string RequirementId { get; set; } = string.Empty;
+    public string StoryId { get; set; } = string.Empty;
     public string UpdateType { get; set; } = string.Empty;
     public PipelinePhase Phase { get; set; }
     public string Message { get; set; } = string.Empty;
@@ -190,13 +190,13 @@ public class CreateCodebaseRequest
 }
 
 /// <summary>
-/// Request to create a requirement with optional codebase
+/// Request to create a story with optional codebase
 /// </summary>
-public class CreateRequirementRequest
+public class CreateStoryRequest
 {
     public string Name { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
-    public RequirementType Type { get; set; }
+    public StoryType Type { get; set; }
     public string? CodebaseId { get; set; }
 }
 
@@ -212,12 +212,12 @@ public enum CodebaseStatus
 }
 
 // Enums
-public enum RequirementType
+public enum StoryType
 {
     Single
 }
 
-public enum RequirementStatus
+public enum StoryStatus
 {
     NotStarted,
     Planned,

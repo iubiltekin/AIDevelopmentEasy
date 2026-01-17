@@ -9,7 +9,7 @@ export function Layout() {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: Home },
     { path: '/codebases', label: 'Codebases', icon: Database },
-    { path: '/requirements', label: 'Requirements', icon: FileCode },
+    { path: '/stories', label: 'Stories', icon: FileCode },
     { path: '/settings', label: 'Settings', icon: Settings },
   ];
 

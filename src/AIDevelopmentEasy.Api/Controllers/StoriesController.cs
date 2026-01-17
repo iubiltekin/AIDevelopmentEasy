@@ -5,60 +5,60 @@ using Microsoft.AspNetCore.Mvc;
 namespace AIDevelopmentEasy.Api.Controllers;
 
 /// <summary>
-/// API endpoints for managing requirements
+/// API endpoints for managing stories
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class RequirementsController : ControllerBase
+public class StoriesController : ControllerBase
 {
-    private readonly IRequirementRepository _requirementRepository;
+    private readonly IStoryRepository _storyRepository;
     private readonly ITaskRepository _taskRepository;
     private readonly IApprovalRepository _approvalRepository;
-    private readonly ILogger<RequirementsController> _logger;
+    private readonly ILogger<StoriesController> _logger;
 
-    public RequirementsController(
-        IRequirementRepository requirementRepository,
+    public StoriesController(
+        IStoryRepository storyRepository,
         ITaskRepository taskRepository,
         IApprovalRepository approvalRepository,
-        ILogger<RequirementsController> logger)
+        ILogger<StoriesController> logger)
     {
-        _requirementRepository = requirementRepository;
+        _storyRepository = storyRepository;
         _taskRepository = taskRepository;
         _approvalRepository = approvalRepository;
         _logger = logger;
     }
 
     /// <summary>
-    /// Get all requirements
+    /// Get all stories
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<RequirementDto>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IEnumerable<StoryDto>>> GetAll(CancellationToken cancellationToken)
     {
-        var requirements = await _requirementRepository.GetAllAsync(cancellationToken);
-        return Ok(requirements);
+        var stories = await _storyRepository.GetAllAsync(cancellationToken);
+        return Ok(stories);
     }
 
     /// <summary>
-    /// Get a single requirement by ID
+    /// Get a single story by ID
     /// </summary>
     [HttpGet("{id}")]
-    public async Task<ActionResult<RequirementDto>> GetById(string id, CancellationToken cancellationToken)
+    public async Task<ActionResult<StoryDto>> GetById(string id, CancellationToken cancellationToken)
     {
-        var requirement = await _requirementRepository.GetByIdAsync(id, cancellationToken);
+        var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
         
-        if (requirement == null)
+        if (story == null)
             return NotFound();
 
-        return Ok(requirement);
+        return Ok(story);
     }
 
     /// <summary>
-    /// Get requirement content (raw text/JSON)
+    /// Get story content (raw text/JSON)
     /// </summary>
     [HttpGet("{id}/content")]
     public async Task<ActionResult<string>> GetContent(string id, CancellationToken cancellationToken)
     {
-        var content = await _requirementRepository.GetContentAsync(id, cancellationToken);
+        var content = await _storyRepository.GetContentAsync(id, cancellationToken);
         
         if (content == null)
             return NotFound();
@@ -67,22 +67,22 @@ public class RequirementsController : ControllerBase
     }
 
     /// <summary>
-    /// Update requirement content (only allowed when status is NotStarted/Draft)
+    /// Update story content (only allowed when status is NotStarted/Draft)
     /// </summary>
     [HttpPut("{id}/content")]
     public async Task<ActionResult> UpdateContent(string id, [FromBody] UpdateContentRequest request, CancellationToken cancellationToken)
     {
-        var requirement = await _requirementRepository.GetByIdAsync(id, cancellationToken);
+        var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
         
-        if (requirement == null)
+        if (story == null)
             return NotFound();
 
         // Only allow editing if not started (Draft state)
-        if (requirement.Status != RequirementStatus.NotStarted)
+        if (story.Status != StoryStatus.NotStarted)
         {
             return BadRequest(new { 
                 error = "Cannot edit content", 
-                message = "Requirement must be reset before editing. Current status: " + requirement.Status 
+                message = "Story must be reset before editing. Current status: " + story.Status 
             });
         }
 
@@ -91,43 +91,43 @@ public class RequirementsController : ControllerBase
             return BadRequest(new { error = "Content cannot be empty" });
         }
 
-        var updated = await _requirementRepository.UpdateContentAsync(id, request.Content, cancellationToken);
+        var updated = await _storyRepository.UpdateContentAsync(id, request.Content, cancellationToken);
         
         if (!updated)
             return NotFound();
 
-        _logger.LogInformation("Updated content for requirement: {Id}", id);
+        _logger.LogInformation("Updated content for story: {Id}", id);
         return Ok(new { message = "Content updated successfully" });
     }
 
     /// <summary>
-    /// Create a new requirement
+    /// Create a new story
     /// </summary>
     [HttpPost]
-    public async Task<ActionResult<RequirementDto>> Create([FromBody] CreateRequirementRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<StoryDto>> Create([FromBody] CreateStoryRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Content))
         {
             return BadRequest("Name and content are required");
         }
 
-        var requirement = await _requirementRepository.CreateAsync(
+        var story = await _storyRepository.CreateAsync(
             request.Name,
             request.Content,
             request.Type,
             request.CodebaseId,
             cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = requirement.Id }, requirement);
+        return CreatedAtAction(nameof(GetById), new { id = story.Id }, story);
     }
 
     /// <summary>
-    /// Delete a requirement
+    /// Delete a story
     /// </summary>
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(string id, CancellationToken cancellationToken)
     {
-        var deleted = await _requirementRepository.DeleteAsync(id, cancellationToken);
+        var deleted = await _storyRepository.DeleteAsync(id, cancellationToken);
         
         if (!deleted)
             return NotFound();
@@ -136,16 +136,16 @@ public class RequirementsController : ControllerBase
     }
 
     /// <summary>
-    /// Get tasks for a requirement
+    /// Get tasks for a story
     /// </summary>
     [HttpGet("{id}/tasks")]
     public async Task<ActionResult<IEnumerable<TaskDto>>> GetTasks(string id, CancellationToken cancellationToken)
     {
-        var exists = await _requirementRepository.ExistsAsync(id, cancellationToken);
+        var exists = await _storyRepository.ExistsAsync(id, cancellationToken);
         if (!exists)
             return NotFound();
 
-        var tasks = await _taskRepository.GetByRequirementAsync(id, cancellationToken);
+        var tasks = await _taskRepository.GetByStoryAsync(id, cancellationToken);
         return Ok(tasks);
     }
 
@@ -155,7 +155,7 @@ public class RequirementsController : ControllerBase
     [HttpPut("{id}/tasks/{taskIndex}")]
     public async Task<ActionResult> UpdateTask(string id, int taskIndex, [FromBody] TaskDto task, CancellationToken cancellationToken)
     {
-        var exists = await _requirementRepository.ExistsAsync(id, cancellationToken);
+        var exists = await _storyRepository.ExistsAsync(id, cancellationToken);
         if (!exists)
             return NotFound();
 
@@ -165,34 +165,26 @@ public class RequirementsController : ControllerBase
     }
 
     /// <summary>
-    /// Reset requirement (clear tasks and approval state)
+    /// Reset story (clear tasks and approval state)
     /// </summary>
     [HttpPost("{id}/reset")]
     public async Task<ActionResult> Reset(string id, [FromQuery] bool clearTasks = true, CancellationToken cancellationToken = default)
     {
-        var exists = await _requirementRepository.ExistsAsync(id, cancellationToken);
+        var exists = await _storyRepository.ExistsAsync(id, cancellationToken);
         if (!exists)
             return NotFound();
 
         // Reset all status flags including failed status
-        await _requirementRepository.UpdateStatusAsync(id, RequirementStatus.NotStarted, cancellationToken);
+        await _storyRepository.UpdateStatusAsync(id, StoryStatus.NotStarted, cancellationToken);
 
         if (clearTasks)
         {
             await _taskRepository.DeleteAllAsync(id, cancellationToken);
         }
 
-        _logger.LogInformation("Reset requirement: {Id}", id);
+        _logger.LogInformation("Reset story: {Id}", id);
         return NoContent();
     }
-}
-
-public class CreateRequirementRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public string Content { get; set; } = string.Empty;
-    public RequirementType Type { get; set; } = RequirementType.Single;
-    public string? CodebaseId { get; set; }
 }
 
 public class UpdateContentRequest

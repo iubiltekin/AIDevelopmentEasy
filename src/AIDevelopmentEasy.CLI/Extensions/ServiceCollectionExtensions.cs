@@ -39,7 +39,7 @@ public static class ServiceCollectionExtensions
 
         // UI Services
         services.AddSingleton<IConsoleUI, ConsoleUI>();
-        services.AddSingleton<IRequirementLoader, RequirementLoader>();
+        services.AddSingleton<IStoryLoader, StoryLoader>();
 
         // Pipeline Runner
         services.AddSingleton<IPipelineRunner, PipelineRunner>();

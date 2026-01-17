@@ -1,18 +1,18 @@
-import { RequirementStatus, getStatusLabel, getStatusColor } from '../types';
+import { StoryStatus, getStatusLabel, getStatusColor } from '../types';
 
 interface StatusBadgeProps {
-  status: RequirementStatus;
+  status: StoryStatus;
   className?: string;
 }
 
 export function StatusBadge({ status, className = '' }: StatusBadgeProps) {
-  const icons: Record<RequirementStatus, string> = {
-    [RequirementStatus.NotStarted]: '⬜',
-    [RequirementStatus.Planned]: '📋',
-    [RequirementStatus.Approved]: '✅',
-    [RequirementStatus.InProgress]: '🔄',
-    [RequirementStatus.Completed]: '✔️',
-    [RequirementStatus.Failed]: '❌'
+  const icons: Record<StoryStatus, string> = {
+    [StoryStatus.NotStarted]: '⬜',
+    [StoryStatus.Planned]: '📋',
+    [StoryStatus.Approved]: '✅',
+    [StoryStatus.InProgress]: '🔄',
+    [StoryStatus.Completed]: '✔️',
+    [StoryStatus.Failed]: '❌'
   };
 
   return (

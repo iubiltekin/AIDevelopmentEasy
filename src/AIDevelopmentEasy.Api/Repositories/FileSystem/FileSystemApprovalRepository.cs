@@ -10,7 +10,7 @@ namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
 /// </summary>
 public class FileSystemApprovalRepository : IApprovalRepository
 {
-    private readonly string _requirementsPath;
+    private readonly string _storiesPath;
     private readonly ILogger<FileSystemApprovalRepository> _logger;
     private readonly JsonSerializerOptions _jsonOptions;
 
@@ -18,9 +18,9 @@ public class FileSystemApprovalRepository : IApprovalRepository
     private const string CompletedFileName = "_completed.json";
     private const string InProgressFileName = "_inprogress.json";
 
-    public FileSystemApprovalRepository(string requirementsPath, ILogger<FileSystemApprovalRepository> logger)
+    public FileSystemApprovalRepository(string storiesPath, ILogger<FileSystemApprovalRepository> logger)
     {
-        _requirementsPath = requirementsPath;
+        _storiesPath = storiesPath;
         _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
@@ -29,152 +29,152 @@ public class FileSystemApprovalRepository : IApprovalRepository
         };
     }
 
-    public Task<bool> IsPlanApprovedAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<bool> IsPlanApprovedAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetApprovedFilePath(requirementId);
+        var filePath = GetApprovedFilePath(storyId);
         return Task.FromResult(File.Exists(filePath));
     }
 
-    public async Task ApprovePlanAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task ApprovePlanAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var folderPath = GetRequirementFolder(requirementId);
+        var folderPath = GetStoryFolder(storyId);
         Directory.CreateDirectory(folderPath);
 
-        var filePath = GetApprovedFilePath(requirementId);
+        var filePath = GetApprovedFilePath(storyId);
         var approvalData = new
         {
             ApprovedAt = DateTime.UtcNow,
-            RequirementId = requirementId
+            StoryId = storyId
         };
 
         var json = JsonSerializer.Serialize(approvalData, _jsonOptions);
         await File.WriteAllTextAsync(filePath, json, cancellationToken);
 
-        _logger.LogInformation("Plan approved for requirement: {RequirementId}", requirementId);
+        _logger.LogInformation("Plan approved for story: {StoryId}", storyId);
     }
 
-    public Task<bool> IsCompletedAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<bool> IsCompletedAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetCompletedFilePath(requirementId);
+        var filePath = GetCompletedFilePath(storyId);
         return Task.FromResult(File.Exists(filePath));
     }
 
-    public async Task MarkCompletedAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task MarkCompletedAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var folderPath = GetRequirementFolder(requirementId);
+        var folderPath = GetStoryFolder(storyId);
         Directory.CreateDirectory(folderPath);
 
-        var filePath = GetCompletedFilePath(requirementId);
+        var filePath = GetCompletedFilePath(storyId);
         var completionData = new
         {
             CompletedAt = DateTime.UtcNow,
-            RequirementId = requirementId
+            StoryId = storyId
         };
 
         var json = JsonSerializer.Serialize(completionData, _jsonOptions);
         await File.WriteAllTextAsync(filePath, json, cancellationToken);
 
-        _logger.LogInformation("Requirement marked as completed: {RequirementId}", requirementId);
+        _logger.LogInformation("Story marked as completed: {StoryId}", storyId);
     }
 
-    public Task ResetApprovalAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task ResetApprovalAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetApprovedFilePath(requirementId);
+        var filePath = GetApprovedFilePath(storyId);
         
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
-            _logger.LogInformation("Approval reset for requirement: {RequirementId}", requirementId);
+            _logger.LogInformation("Approval reset for story: {StoryId}", storyId);
         }
 
         return Task.CompletedTask;
     }
 
-    public Task ResetCompletionAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task ResetCompletionAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetCompletedFilePath(requirementId);
+        var filePath = GetCompletedFilePath(storyId);
         
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
-            _logger.LogInformation("Completion reset for requirement: {RequirementId}", requirementId);
+            _logger.LogInformation("Completion reset for story: {StoryId}", storyId);
         }
 
         return Task.CompletedTask;
     }
 
-    public Task<bool> IsInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<bool> IsInProgressAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetInProgressFilePath(requirementId);
+        var filePath = GetInProgressFilePath(storyId);
         return Task.FromResult(File.Exists(filePath));
     }
 
-    public async Task MarkInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task MarkInProgressAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var folderPath = GetRequirementFolder(requirementId);
+        var folderPath = GetStoryFolder(storyId);
         Directory.CreateDirectory(folderPath);
 
-        var filePath = GetInProgressFilePath(requirementId);
+        var filePath = GetInProgressFilePath(storyId);
         var data = new
         {
             StartedAt = DateTime.UtcNow,
-            RequirementId = requirementId
+            StoryId = storyId
         };
 
         var json = JsonSerializer.Serialize(data, _jsonOptions);
         await File.WriteAllTextAsync(filePath, json, cancellationToken);
 
-        _logger.LogInformation("Requirement marked as in progress: {RequirementId}", requirementId);
+        _logger.LogInformation("Story marked as in progress: {StoryId}", storyId);
     }
 
-    public Task ResetInProgressAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task ResetInProgressAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var filePath = GetInProgressFilePath(requirementId);
+        var filePath = GetInProgressFilePath(storyId);
         
         if (File.Exists(filePath))
         {
             File.Delete(filePath);
-            _logger.LogInformation("In progress reset for requirement: {RequirementId}", requirementId);
+            _logger.LogInformation("In progress reset for story: {StoryId}", storyId);
         }
 
         return Task.CompletedTask;
     }
 
-    public async Task<RequirementStatus> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<StoryStatus> GetStatusAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var isCompleted = await IsCompletedAsync(requirementId, cancellationToken);
+        var isCompleted = await IsCompletedAsync(storyId, cancellationToken);
         if (isCompleted)
-            return RequirementStatus.Completed;
+            return StoryStatus.Completed;
 
-        var isInProgress = await IsInProgressAsync(requirementId, cancellationToken);
+        var isInProgress = await IsInProgressAsync(storyId, cancellationToken);
         if (isInProgress)
-            return RequirementStatus.InProgress;
+            return StoryStatus.InProgress;
 
-        var isApproved = await IsPlanApprovedAsync(requirementId, cancellationToken);
+        var isApproved = await IsPlanApprovedAsync(storyId, cancellationToken);
         if (isApproved)
-            return RequirementStatus.Approved;
+            return StoryStatus.Approved;
 
-        // Check if has tasks (planned state) - this will be handled by RequirementRepository
-        return RequirementStatus.NotStarted;
+        // Check if has tasks (planned state) - this will be handled by StoryRepository
+        return StoryStatus.NotStarted;
     }
 
-    private string GetRequirementFolder(string requirementId)
+    private string GetStoryFolder(string storyId)
     {
-        return Path.Combine(_requirementsPath, requirementId);
+        return Path.Combine(_storiesPath, storyId);
     }
 
-    private string GetApprovedFilePath(string requirementId)
+    private string GetApprovedFilePath(string storyId)
     {
-        return Path.Combine(GetRequirementFolder(requirementId), ApprovedFileName);
+        return Path.Combine(GetStoryFolder(storyId), ApprovedFileName);
     }
 
-    private string GetCompletedFilePath(string requirementId)
+    private string GetCompletedFilePath(string storyId)
     {
-        return Path.Combine(GetRequirementFolder(requirementId), CompletedFileName);
+        return Path.Combine(GetStoryFolder(storyId), CompletedFileName);
     }
 
-    private string GetInProgressFilePath(string requirementId)
+    private string GetInProgressFilePath(string storyId)
     {
-        return Path.Combine(GetRequirementFolder(requirementId), InProgressFileName);
+        return Path.Combine(GetStoryFolder(storyId), InProgressFileName);
     }
 }

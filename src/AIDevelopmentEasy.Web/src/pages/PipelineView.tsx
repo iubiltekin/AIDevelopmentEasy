@@ -7,7 +7,7 @@ import {
   PipelineUpdateMessage,
   RetryAction
 } from '../types';
-import { pipelineApi, requirementsApi } from '../services/api';
+import { pipelineApi, storiesApi } from '../services/api';
 import { PipelineStatus } from '../components/PipelineStatus';
 import { LogViewer } from '../components/LogViewer';
 import { useSignalR } from '../hooks/useSignalR';
@@ -16,12 +16,12 @@ export function PipelineView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [status, setStatus] = useState<PipelineStatusDto | null>(null);
-  const [requirement, setRequirement] = useState<{ name: string } | null>(null);
+  const [story, setStory] = useState<{ name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<PipelineUpdateMessage[]>([]);
   
-  const { lastUpdate, subscribeToRequirement, unsubscribeFromRequirement } = useSignalR();
+  const { lastUpdate, subscribeToStory, unsubscribeFromStory } = useSignalR();
 
   const loadStatus = useCallback(async () => {
     if (!id) return;
@@ -29,10 +29,10 @@ export function PipelineView() {
     try {
       const [pipelineStatus, req] = await Promise.all([
         pipelineApi.getStatus(id),
-        requirementsApi.getById(id)
+        storiesApi.getById(id)
       ]);
       setStatus(pipelineStatus);
-      setRequirement({ name: req.name });
+      setStory({ name: req.name });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pipeline status');
@@ -45,15 +45,15 @@ export function PipelineView() {
     loadStatus();
     
     if (id) {
-      subscribeToRequirement(id);
+      subscribeToStory(id);
       return () => {
-        unsubscribeFromRequirement(id);
+        unsubscribeFromStory(id);
       };
     }
-  }, [id, loadStatus, subscribeToRequirement, unsubscribeFromRequirement]);
+  }, [id, loadStatus, subscribeToStory, unsubscribeFromStory]);
 
   useEffect(() => {
-    if (lastUpdate && lastUpdate.requirementId === id) {
+    if (lastUpdate && lastUpdate.storyId === id) {
       setLogs(prev => [...prev, lastUpdate]);
       loadStatus(); // Refresh status on update
     }
@@ -112,7 +112,7 @@ export function PipelineView() {
       
       // Add log entry
       setLogs(prev => [...prev, {
-        requirementId: id,
+        storyId: id,
         updateType: 'RetryApproved',
         phase: status?.currentPhase || PipelinePhase.None,
         message: `Retry action selected: ${actionLabels[action]}`,
@@ -144,7 +144,7 @@ export function PipelineView() {
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-white">
-              {requirement?.name || id}
+              {story?.name || id}
             </h1>
             <p className="text-slate-400">Pipeline Progress</p>
           </div>
@@ -199,7 +199,7 @@ export function PipelineView() {
       {status?.currentPhase === PipelinePhase.Completed && (
         <div className="mt-6 flex gap-4">
           <Link
-            to={`/requirements/${id}`}
+            to={`/storys/${id}`}
             className="flex-1 text-center py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition-colors"
           >
             View Generated Output

@@ -17,7 +17,7 @@ public class PipelineRunner : IPipelineRunner
 {
     private readonly ResolvedPaths _paths;
     private readonly IConsoleUI _console;
-    private readonly IRequirementLoader _requirementLoader;
+    private readonly IStoryLoader _storyLoader;
     private readonly PlannerAgent _plannerAgent;
     private readonly CoderAgent _coderAgent;
     private readonly DebuggerAgent _debuggerAgent;
@@ -32,7 +32,7 @@ public class PipelineRunner : IPipelineRunner
     public PipelineRunner(
         ResolvedPaths paths,
         IConsoleUI console,
-        IRequirementLoader requirementLoader,
+        IStoryLoader storyLoader,
         PlannerAgent plannerAgent,
         CoderAgent coderAgent,
         DebuggerAgent debuggerAgent,
@@ -40,32 +40,32 @@ public class PipelineRunner : IPipelineRunner
     {
         _paths = paths;
         _console = console;
-        _requirementLoader = requirementLoader;
+        _storyLoader = storyLoader;
         _plannerAgent = plannerAgent;
         _coderAgent = coderAgent;
         _debuggerAgent = debuggerAgent;
         _reviewerAgent = reviewerAgent;
     }
 
-    public async Task ProcessAsync(RequirementInfo requirement)
+    public async Task ProcessAsync(StoryInfo story)
     {
-        _console.ShowSectionHeader($"Processing: {requirement.FileName}");
-        requirement.MarkAsInProgress();
+        _console.ShowSectionHeader($"Processing: {story.FileName}");
+        story.MarkAsInProgress();
 
-        var reqContent = await _requirementLoader.LoadRequirementAsync(requirement.FilePath);
-        var tasksDir = Path.Combine(requirement.WorkingDirectory, "tasks");
-        var approvedFile = Path.Combine(requirement.WorkingDirectory, "_approved.json");
+        var reqContent = await _storyLoader.LoadStoryAsync(story.FilePath);
+        var tasksDir = Path.Combine(story.WorkingDirectory, "tasks");
+        var approvedFile = Path.Combine(story.WorkingDirectory, "_approved.json");
 
-        // Show requirement content
-        _console.ShowSubSection("Requirement");
+        // Show story content
+        _console.ShowSubSection("Story");
         _console.ShowInfo(reqContent.Length > 500 ? reqContent[..500] + "..." : reqContent);
 
         // PHASE 1: Planning
-        if (requirement.Status < ProcessingStatus.Planned || !Directory.Exists(tasksDir))
+        if (story.Status < ProcessingStatus.Planned || !Directory.Exists(tasksDir))
         {
             if (!await DoPlanningPhaseAsync(reqContent, tasksDir))
                 return;
-            requirement.MarkAsPlanned();
+            story.MarkAsPlanned();
         }
         else
         {
@@ -73,7 +73,7 @@ public class PipelineRunner : IPipelineRunner
         }
 
         // Confirm plan approval
-        if (requirement.Status < ProcessingStatus.Approved)
+        if (story.Status < ProcessingStatus.Approved)
         {
             if (!_console.ConfirmPlanApproval(tasksDir))
             {
@@ -81,7 +81,7 @@ public class PipelineRunner : IPipelineRunner
                 return;
             }
             await File.WriteAllTextAsync(approvedFile, JsonSerializer.Serialize(new { ApprovedAt = DateTime.Now }));
-            requirement.MarkAsApproved();
+            story.MarkAsApproved();
         }
         else
         {
@@ -117,35 +117,35 @@ public class PipelineRunner : IPipelineRunner
         if (!_console.ConfirmReviewStart())
         {
             _console.ShowWarning("  Review skipped by user");
-            await SaveOutputAsync(requirement.Name, projectState, null);
+            await SaveOutputAsync(story.Name, projectState, null);
             return;
         }
 
         var reviewOutput = await DoReviewPhaseAsync(reqContent, projectState);
 
         // Save output
-        var outputPath = await SaveOutputAsync(requirement.Name, projectState, reviewOutput);
+        var outputPath = await SaveOutputAsync(story.Name, projectState, reviewOutput);
         
         // Mark as completed
-        var completedFile = Path.Combine(requirement.WorkingDirectory, "_completed.json");
+        var completedFile = Path.Combine(story.WorkingDirectory, "_completed.json");
         await File.WriteAllTextAsync(completedFile, JsonSerializer.Serialize(new { CompletedAt = DateTime.Now }));
-        requirement.MarkAsCompleted();
+        story.MarkAsCompleted();
 
         _console.ShowFinalSummary(outputPath, projectState.Codebase.Count);
     }
 
-    private async Task<bool> DoPlanningPhaseAsync(string requirement, string tasksDir)
+    private async Task<bool> DoPlanningPhaseAsync(string story, string tasksDir)
     {
         _console.ShowPhase("PLANNING", 1);
-        _console.ShowProgress("Analyzing requirements and generating tasks...");
+        _console.ShowProgress("Analyzing storys and generating tasks...");
 
         var projectState = new ProjectState
         {
-            Requirement = requirement,
+            Story = story,
             CodingStandards = _paths.CodingStandards
         };
 
-        var planRequest = new AgentRequest { Input = requirement, ProjectState = projectState };
+        var planRequest = new AgentRequest { Input = story, ProjectState = projectState };
         var planResponse = await _plannerAgent.RunAsync(planRequest);
 
         if (!planResponse.Success)
@@ -171,7 +171,7 @@ public class PipelineRunner : IPipelineRunner
         return true;
     }
 
-    private async Task<ProjectState?> DoCodingPhaseAsync(string requirement, string tasksDir)
+    private async Task<ProjectState?> DoCodingPhaseAsync(string story, string tasksDir)
     {
         _console.ShowPhase("CODE GENERATION", 2);
 
@@ -194,7 +194,7 @@ public class PipelineRunner : IPipelineRunner
 
         var projectState = new ProjectState
         {
-            Requirement = requirement,
+            Story = story,
             CodingStandards = _paths.CodingStandards,
             Plan = tasks,
             CurrentPhase = PipelinePhase.Coding
@@ -290,12 +290,12 @@ public class PipelineRunner : IPipelineRunner
         await Task.CompletedTask;
     }
 
-    private async Task<string?> DoReviewPhaseAsync(string requirement, ProjectState projectState)
+    private async Task<string?> DoReviewPhaseAsync(string story, ProjectState projectState)
     {
         _console.ShowPhase("CODE REVIEW", 5);
         _console.ShowProgress("Running code review analysis...");
 
-        var reviewRequest = new AgentRequest { Input = requirement, ProjectState = projectState };
+        var reviewRequest = new AgentRequest { Input = story, ProjectState = projectState };
         var reviewResponse = await _reviewerAgent.RunAsync(reviewRequest);
 
         var verdict = reviewResponse.Data?.GetValueOrDefault("verdict")?.ToString() ?? "Unknown";

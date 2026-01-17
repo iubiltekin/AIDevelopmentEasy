@@ -27,18 +27,18 @@ public class PipelineController : ControllerBase
     }
 
     /// <summary>
-    /// Start processing a requirement
+    /// Start processing a story
     /// </summary>
-    [HttpPost("{requirementId}/start")]
+    [HttpPost("{storyId}/start")]
     public async Task<ActionResult<PipelineStatusDto>> Start(
-        string requirementId,
-        [FromBody] ProcessRequirementRequest? request,
+        string storyId,
+        [FromBody] ProcessStoryRequest? request,
         CancellationToken cancellationToken)
     {
         try
         {
             var status = await _pipelineService.StartAsync(
-                requirementId,
+                storyId,
                 request?.AutoApproveAll ?? false,
                 cancellationToken);
 
@@ -55,22 +55,22 @@ public class PipelineController : ControllerBase
     }
 
     /// <summary>
-    /// Get pipeline status for a requirement
+    /// Get pipeline status for a story
     /// </summary>
-    [HttpGet("{requirementId}/status")]
-    public async Task<ActionResult<PipelineStatusDto>> GetStatus(string requirementId, CancellationToken cancellationToken)
+    [HttpGet("{storyId}/status")]
+    public async Task<ActionResult<PipelineStatusDto>> GetStatus(string storyId, CancellationToken cancellationToken)
     {
-        var status = await _pipelineService.GetStatusAsync(requirementId, cancellationToken);
+        var status = await _pipelineService.GetStatusAsync(storyId, cancellationToken);
         return Ok(status);
     }
 
     /// <summary>
     /// Approve a phase
     /// </summary>
-    [HttpPost("{requirementId}/approve/{phase}")]
-    public async Task<ActionResult> ApprovePhase(string requirementId, PipelinePhase phase, CancellationToken cancellationToken)
+    [HttpPost("{storyId}/approve/{phase}")]
+    public async Task<ActionResult> ApprovePhase(string storyId, PipelinePhase phase, CancellationToken cancellationToken)
     {
-        var approved = await _pipelineService.ApprovePhaseAsync(requirementId, phase, cancellationToken);
+        var approved = await _pipelineService.ApprovePhaseAsync(storyId, phase, cancellationToken);
         
         if (!approved)
             return BadRequest("Cannot approve phase - pipeline not waiting for approval at this phase");
@@ -81,15 +81,15 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Reject a phase
     /// </summary>
-    [HttpPost("{requirementId}/reject/{phase}")]
+    [HttpPost("{storyId}/reject/{phase}")]
     public async Task<ActionResult> RejectPhase(
-        string requirementId,
+        string storyId,
         PipelinePhase phase,
         [FromBody] RejectPhaseRequest? request,
         CancellationToken cancellationToken)
     {
         var rejected = await _pipelineService.RejectPhaseAsync(
-            requirementId, phase, request?.Reason, cancellationToken);
+            storyId, phase, request?.Reason, cancellationToken);
         
         if (!rejected)
             return BadRequest("Cannot reject phase - pipeline not waiting for approval at this phase");
@@ -100,10 +100,10 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Cancel a running pipeline
     /// </summary>
-    [HttpPost("{requirementId}/cancel")]
-    public async Task<ActionResult> Cancel(string requirementId, CancellationToken cancellationToken)
+    [HttpPost("{storyId}/cancel")]
+    public async Task<ActionResult> Cancel(string storyId, CancellationToken cancellationToken)
     {
-        await _pipelineService.CancelAsync(requirementId, cancellationToken);
+        await _pipelineService.CancelAsync(storyId, cancellationToken);
         return Ok();
     }
 
@@ -118,22 +118,22 @@ public class PipelineController : ControllerBase
     }
 
     /// <summary>
-    /// Get generated files for a requirement
+    /// Get generated files for a story
     /// </summary>
-    [HttpGet("{requirementId}/output")]
-    public async Task<ActionResult<Dictionary<string, string>>> GetOutput(string requirementId, CancellationToken cancellationToken)
+    [HttpGet("{storyId}/output")]
+    public async Task<ActionResult<Dictionary<string, string>>> GetOutput(string storyId, CancellationToken cancellationToken)
     {
-        var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, cancellationToken);
+        var files = await _outputRepository.GetGeneratedFilesAsync(storyId, cancellationToken);
         return Ok(files);
     }
 
     /// <summary>
-    /// Get review report for a requirement
+    /// Get review report for a story
     /// </summary>
-    [HttpGet("{requirementId}/review")]
-    public async Task<ActionResult<string>> GetReviewReport(string requirementId, CancellationToken cancellationToken)
+    [HttpGet("{storyId}/review")]
+    public async Task<ActionResult<string>> GetReviewReport(string storyId, CancellationToken cancellationToken)
     {
-        var report = await _outputRepository.GetReviewReportAsync(requirementId, cancellationToken);
+        var report = await _outputRepository.GetReviewReportAsync(storyId, cancellationToken);
         
         if (report == null)
             return NotFound();
@@ -154,13 +154,13 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Approve retry with specified action
     /// </summary>
-    [HttpPost("{requirementId}/retry")]
+    [HttpPost("{storyId}/retry")]
     public async Task<ActionResult> ApproveRetry(
-        string requirementId,
+        string storyId,
         [FromBody] ApproveRetryRequest request,
         CancellationToken cancellationToken)
     {
-        var approved = await _pipelineService.ApproveRetryAsync(requirementId, request.Action, cancellationToken);
+        var approved = await _pipelineService.ApproveRetryAsync(storyId, request.Action, cancellationToken);
         
         if (!approved)
             return BadRequest("Cannot approve retry - no retry pending");
@@ -171,21 +171,21 @@ public class PipelineController : ControllerBase
     /// <summary>
     /// Get current retry info if any
     /// </summary>
-    [HttpGet("{requirementId}/retry")]
-    public async Task<ActionResult<RetryInfoDto?>> GetRetryInfo(string requirementId, CancellationToken cancellationToken)
+    [HttpGet("{storyId}/retry")]
+    public async Task<ActionResult<RetryInfoDto?>> GetRetryInfo(string storyId, CancellationToken cancellationToken)
     {
-        var retryInfo = await _pipelineService.GetRetryInfoAsync(requirementId, cancellationToken);
+        var retryInfo = await _pipelineService.GetRetryInfoAsync(storyId, cancellationToken);
         return Ok(retryInfo);
     }
 
     /// <summary>
     /// Get pipeline execution history (all phase details from completed pipeline)
     /// </summary>
-    [HttpGet("{requirementId}/history")]
-    public async Task<ActionResult<PipelineStatusDto?>> GetHistory(string requirementId, CancellationToken cancellationToken)
+    [HttpGet("{storyId}/history")]
+    public async Task<ActionResult<PipelineStatusDto?>> GetHistory(string storyId, CancellationToken cancellationToken)
     {
         // First try to get from running/memory
-        var status = await _pipelineService.GetStatusAsync(requirementId, cancellationToken);
+        var status = await _pipelineService.GetStatusAsync(storyId, cancellationToken);
         
         if (status != null && status.CurrentPhase == PipelinePhase.Completed)
         {
@@ -193,11 +193,11 @@ public class PipelineController : ControllerBase
         }
 
         // Try to get from disk directly
-        var historyJson = await _outputRepository.GetPipelineHistoryAsync(requirementId, cancellationToken);
+        var historyJson = await _outputRepository.GetPipelineHistoryAsync(storyId, cancellationToken);
         
         if (string.IsNullOrEmpty(historyJson))
         {
-            return NotFound(new { Message = "No pipeline history found for this requirement" });
+            return NotFound(new { Message = "No pipeline history found for this story" });
         }
 
         try
@@ -210,7 +210,7 @@ public class PipelineController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deserialize pipeline history for {RequirementId}", requirementId);
+            _logger.LogError(ex, "Failed to deserialize pipeline history for {StoryId}", storyId);
             return BadRequest(new { Message = "Failed to parse pipeline history" });
         }
     }

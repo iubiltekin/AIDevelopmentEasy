@@ -9,12 +9,12 @@ public interface IConsoleUI
 {
     // Banner and basic display
     void ShowBanner();
-    void ShowPaths(string codingStandardsPath, string requirementsPath, string outputPath, string logsPath);
+    void ShowPaths(string codingStandardsPath, string storiesPath, string outputPath, string logsPath);
     void Clear();
     
-    // Requirements menu
-    void ShowRequirementsMenu(IReadOnlyList<RequirementInfo> requirements);
-    RequirementInfo? SelectRequirement(IReadOnlyList<RequirementInfo> requirements);
+    // Stories menu
+    void ShowStoriesMenu(IReadOnlyList<StoryInfo> stories);
+    StoryInfo? SelectStory(IReadOnlyList<StoryInfo> stories);
     
     // Phase display
     void ShowPhase(string phaseName, int? phaseNumber = null);
@@ -56,5 +56,5 @@ public interface IConsoleUI
     void PressAnyKeyToContinue(string message = "Press any key to continue...");
     
     void ShowCompleted();
-    void ShowNoRequirementsFound(string requirementsPath);
+    void ShowNoStoriesFound(string storiesPath);
 }

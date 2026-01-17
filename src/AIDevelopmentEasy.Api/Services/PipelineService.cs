@@ -18,18 +18,18 @@ namespace AIDevelopmentEasy.Api.Services;
 /// Pipeline orchestration service based on AgentMesh framework (arXiv:2507.19902).
 /// 
 /// Manages the execution of the multi-agent pipeline with approval gates:
-/// 1. Planning - PlannerAgent decomposes requirements into tasks (with codebase context)
+/// 1. Planning - PlannerAgent decomposes stories into tasks (with codebase context)
 /// 2. Coding - CoderAgent generates code for each task
 /// 3. Debugging - DebuggerAgent tests and fixes code
 /// 4. Testing - Test analysis and execution
 /// 5. Reviewing - ReviewerAgent validates final output
 /// 
-/// When a codebase is associated with the requirement, CodeAnalysisAgent provides
+/// When a codebase is associated with the story, CodeAnalysisAgent provides
 /// context about existing projects, patterns, and conventions to the PlannerAgent.
 /// </summary>
 public class PipelineService : IPipelineService
 {
-    private readonly IRequirementRepository _requirementRepository;
+    private readonly IStoryRepository _storyRepository;
     private readonly ITaskRepository _taskRepository;
     private readonly IApprovalRepository _approvalRepository;
     private readonly IOutputRepository _outputRepository;
@@ -51,7 +51,7 @@ public class PipelineService : IPipelineService
     private static readonly ConcurrentDictionary<string, PipelineStatusDto> _completedPipelines = new();
 
     public PipelineService(
-        IRequirementRepository requirementRepository,
+        IStoryRepository storyRepository,
         ITaskRepository taskRepository,
         IApprovalRepository approvalRepository,
         IOutputRepository outputRepository,
@@ -66,7 +66,7 @@ public class PipelineService : IPipelineService
         UnitTestAgent unitTestAgent,
         ILogger<PipelineService> logger)
     {
-        _requirementRepository = requirementRepository;
+        _storyRepository = storyRepository;
         _taskRepository = taskRepository;
         _approvalRepository = approvalRepository;
         _outputRepository = outputRepository;
@@ -82,37 +82,37 @@ public class PipelineService : IPipelineService
         _logger = logger;
     }
 
-    public async Task<PipelineStatusDto> StartAsync(string requirementId, bool autoApproveAll = false, CancellationToken cancellationToken = default)
+    public async Task<PipelineStatusDto> StartAsync(string storyId, bool autoApproveAll = false, CancellationToken cancellationToken = default)
     {
         // Check if already running
-        if (_runningPipelines.ContainsKey(requirementId))
+        if (_runningPipelines.ContainsKey(storyId))
         {
-            throw new InvalidOperationException($"Pipeline already running for requirement: {requirementId}");
+            throw new InvalidOperationException($"Pipeline already running for story: {storyId}");
         }
 
-        // Get the requirement
-        var requirement = await _requirementRepository.GetByIdAsync(requirementId, cancellationToken);
-        if (requirement == null)
+        // Get the story
+        var story = await _storyRepository.GetByIdAsync(storyId, cancellationToken);
+        if (story == null)
         {
-            throw new ArgumentException($"Requirement not found: {requirementId}");
+            throw new ArgumentException($"Requirement not found: {storyId}");
         }
 
         // Check if already completed
-        if (requirement.Status == RequirementStatus.Completed)
+        if (story.Status == StoryStatus.Completed)
         {
-            throw new InvalidOperationException($"Requirement already completed: {requirementId}");
+            throw new InvalidOperationException($"Requirement already completed: {storyId}");
         }
 
         // Create pipeline execution context
         var execution = new PipelineExecution
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             AutoApproveAll = autoApproveAll,
-            Status = CreateInitialStatus(requirementId),
+            Status = CreateInitialStatus(storyId),
             CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
         };
 
-        _runningPipelines[requirementId] = execution;
+        _runningPipelines[storyId] = execution;
 
         // Start pipeline execution in background
         _ = Task.Run(() => ExecutePipelineAsync(execution), execution.CancellationTokenSource.Token);
@@ -120,22 +120,22 @@ public class PipelineService : IPipelineService
         return execution.Status;
     }
 
-    public async Task<PipelineStatusDto?> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<PipelineStatusDto?> GetStatusAsync(string storyId, CancellationToken cancellationToken = default)
     {
         // Check running pipelines first
-        if (_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (_runningPipelines.TryGetValue(storyId, out var execution))
         {
             return execution.Status;
         }
 
         // Check completed pipelines (in-memory cache)
-        if (_completedPipelines.TryGetValue(requirementId, out var completedStatus))
+        if (_completedPipelines.TryGetValue(storyId, out var completedStatus))
         {
             return completedStatus;
         }
 
         // Try to load from disk (for completed pipelines after restart)
-        var historyJson = await _outputRepository.GetPipelineHistoryAsync(requirementId, cancellationToken);
+        var historyJson = await _outputRepository.GetPipelineHistoryAsync(storyId, cancellationToken);
         if (!string.IsNullOrEmpty(historyJson))
         {
             try
@@ -147,28 +147,28 @@ public class PipelineService : IPipelineService
                 if (status != null)
                 {
                     // Cache it for future requests
-                    _completedPipelines[requirementId] = status;
+                    _completedPipelines[storyId] = status;
                     return status;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to deserialize pipeline history for {RequirementId}", requirementId);
+                _logger.LogWarning(ex, "Failed to deserialize pipeline history for {StoryId}", storyId);
             }
         }
 
         // Return a "not running" status
         return new PipelineStatusDto
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             CurrentPhase = PipelinePhase.None,
             IsRunning = false
         };
     }
 
-    public Task<bool> ApprovePhaseAsync(string requirementId, PipelinePhase phase, CancellationToken cancellationToken = default)
+    public Task<bool> ApprovePhaseAsync(string storyId, PipelinePhase phase, CancellationToken cancellationToken = default)
     {
-        if (!_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (!_runningPipelines.TryGetValue(storyId, out var execution))
         {
             return Task.FromResult(false);
         }
@@ -180,13 +180,13 @@ public class PipelineService : IPipelineService
         }
 
         execution.PhaseApprovalTcs.TrySetResult(true);
-        _logger.LogInformation("[{RequirementId}] Phase {Phase} approved", requirementId, phase);
+        _logger.LogInformation("[{StoryId}] Phase {Phase} approved", storyId, phase);
         return Task.FromResult(true);
     }
 
-    public async Task<bool> RejectPhaseAsync(string requirementId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectPhaseAsync(string storyId, PipelinePhase phase, string? reason = null, CancellationToken cancellationToken = default)
     {
-        if (!_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (!_runningPipelines.TryGetValue(storyId, out var execution))
         {
             return false;
         }
@@ -196,14 +196,14 @@ public class PipelineService : IPipelineService
             return false;
         }
 
-        _logger.LogInformation("[{RequirementId}] Phase {Phase} rejected. Reason: {Reason}", requirementId, phase, reason);
+        _logger.LogInformation("[{StoryId}] Phase {Phase} rejected. Reason: {Reason}", storyId, phase, reason);
 
         // If rejecting UnitTesting or later phases, rollback deployment changes
         if (phase >= PipelinePhase.UnitTesting && execution.LastDeploymentResult != null)
         {
-            _logger.LogInformation("[{RequirementId}] Rolling back deployment changes...", requirementId);
+            _logger.LogInformation("[{StoryId}] Rolling back deployment changes...", storyId);
 
-            await _notificationService.NotifyProgressAsync(requirementId, "🔄 Rolling back deployment changes...");
+            await _notificationService.NotifyProgressAsync(storyId, "🔄 Rolling back deployment changes...");
 
             try
             {
@@ -211,17 +211,17 @@ public class PipelineService : IPipelineService
 
                 if (rollbackResult.Success)
                 {
-                    _logger.LogInformation("[{RequirementId}] Rollback completed: {Deleted} files deleted, {Reverted} projects reverted",
-                        requirementId, rollbackResult.DeletedFiles.Count, rollbackResult.RevertedProjects.Count);
+                    _logger.LogInformation("[{StoryId}] Rollback completed: {Deleted} files deleted, {Reverted} projects reverted",
+                        storyId, rollbackResult.DeletedFiles.Count, rollbackResult.RevertedProjects.Count);
 
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"✅ Rollback completed: {rollbackResult.DeletedFiles.Count} files deleted, {rollbackResult.RevertedProjects.Count} projects reverted");
                 }
                 else
                 {
                     var errorMsg = rollbackResult.Errors.Count > 0 ? string.Join("; ", rollbackResult.Errors) : "Unknown error";
-                    _logger.LogWarning("[{RequirementId}] Rollback had issues: {Error}", requirementId, errorMsg);
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    _logger.LogWarning("[{StoryId}] Rollback had issues: {Error}", storyId, errorMsg);
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"⚠️ Rollback completed with issues: {errorMsg}");
                 }
 
@@ -230,8 +230,8 @@ public class PipelineService : IPipelineService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[{RequirementId}] Rollback failed", requirementId);
-                await _notificationService.NotifyProgressAsync(requirementId, $"❌ Rollback failed: {ex.Message}");
+                _logger.LogError(ex, "[{StoryId}] Rollback failed", storyId);
+                await _notificationService.NotifyProgressAsync(storyId, $"❌ Rollback failed: {ex.Message}");
             }
         }
 
@@ -240,21 +240,21 @@ public class PipelineService : IPipelineService
         return true;
     }
 
-    public Task CancelAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task CancelAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        if (_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (_runningPipelines.TryGetValue(storyId, out var execution))
         {
             execution.CancellationTokenSource.Cancel();
-            _runningPipelines.TryRemove(requirementId, out _);
-            _logger.LogInformation("[{RequirementId}] Pipeline cancelled", requirementId);
+            _runningPipelines.TryRemove(storyId, out _);
+            _logger.LogInformation("[{StoryId}] Pipeline cancelled", storyId);
         }
 
         return Task.CompletedTask;
     }
 
-    public Task<bool> IsRunningAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<bool> IsRunningAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_runningPipelines.ContainsKey(requirementId));
+        return Task.FromResult(_runningPipelines.ContainsKey(storyId));
     }
 
     public Task<IEnumerable<string>> GetRunningPipelinesAsync(CancellationToken cancellationToken = default)
@@ -262,27 +262,27 @@ public class PipelineService : IPipelineService
         return Task.FromResult<IEnumerable<string>>(_runningPipelines.Keys.ToList());
     }
 
-    public Task<bool> ApproveRetryAsync(string requirementId, RetryAction action, CancellationToken cancellationToken = default)
+    public Task<bool> ApproveRetryAsync(string storyId, RetryAction action, CancellationToken cancellationToken = default)
     {
-        if (!_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (!_runningPipelines.TryGetValue(storyId, out var execution))
         {
             return Task.FromResult(false);
         }
 
         if (execution.RetryApprovalTcs == null)
         {
-            _logger.LogWarning("Cannot approve retry - no retry pending for {RequirementId}", requirementId);
+            _logger.LogWarning("Cannot approve retry - no retry pending for {StoryId}", storyId);
             return Task.FromResult(false);
         }
 
         execution.RetryApprovalTcs.TrySetResult(action);
-        _logger.LogInformation("[{RequirementId}] Retry approved with action: {Action}", requirementId, action);
+        _logger.LogInformation("[{StoryId}] Retry approved with action: {Action}", storyId, action);
         return Task.FromResult(true);
     }
 
-    public Task<RetryInfoDto?> GetRetryInfoAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<RetryInfoDto?> GetRetryInfoAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        if (_runningPipelines.TryGetValue(requirementId, out var execution))
+        if (_runningPipelines.TryGetValue(storyId, out var execution))
         {
             return Task.FromResult(execution.CurrentRetryInfo);
         }
@@ -291,7 +291,7 @@ public class PipelineService : IPipelineService
 
     private async Task ExecutePipelineAsync(PipelineExecution execution)
     {
-        var requirementId = execution.RequirementId;
+        var storyId = execution.StoryId;
         var ct = execution.CancellationTokenSource.Token;
 
         try
@@ -299,21 +299,21 @@ public class PipelineService : IPipelineService
             execution.Status.IsRunning = true;
             execution.Status.StartedAt = DateTime.UtcNow;
 
-            // Update requirement status to InProgress
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.InProgress, ct);
-            await _notificationService.NotifyRequirementListChangedAsync();
+            // Update story status to InProgress
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.InProgress, ct);
+            await _notificationService.NotifyStoryListChangedAsync();
 
-            // Get requirement content
-            var content = await _requirementRepository.GetContentAsync(requirementId, ct);
+            // Get story content
+            var content = await _storyRepository.GetContentAsync(storyId, ct);
             if (string.IsNullOrEmpty(content))
             {
                 throw new InvalidOperationException("Requirement content is empty");
             }
 
-            var requirement = await _requirementRepository.GetByIdAsync(requirementId, ct);
-            if (requirement == null)
+            var story = await _storyRepository.GetByIdAsync(storyId, ct);
+            if (story == null)
             {
-                throw new InvalidOperationException($"Requirement not found: {requirementId}");
+                throw new InvalidOperationException($"Requirement not found: {storyId}");
             }
 
             // Phase 1: Analysis (optional - only when codebase is linked)
@@ -321,48 +321,48 @@ public class PipelineService : IPipelineService
             ClassSearchResult? classResult = null;
             ReferenceSearchResult? referenceResult = null;
 
-            if (!string.IsNullOrEmpty(requirement.CodebaseId))
+            if (!string.IsNullOrEmpty(story.CodebaseId))
             {
                 var analysisResult = await ExecutePhaseAsync(execution, PipelinePhase.Analysis, async () =>
                 {
-                    await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Analysis,
+                    await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Analysis,
                         "CodeAnalysisAgent analyzing codebase...");
 
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Loading codebase: {requirement.CodebaseId}");
-                    codebaseAnalysis = await _codebaseRepository.GetAnalysisAsync(requirement.CodebaseId, ct);
+                    await _notificationService.NotifyProgressAsync(storyId, $"Loading codebase: {story.CodebaseId}");
+                    codebaseAnalysis = await _codebaseRepository.GetAnalysisAsync(story.CodebaseId, ct);
 
                     if (codebaseAnalysis == null)
                     {
-                        throw new InvalidOperationException($"Codebase analysis not found: {requirement.CodebaseId}");
+                        throw new InvalidOperationException($"Codebase analysis not found: {story.CodebaseId}");
                     }
 
                     var summary = codebaseAnalysis.Summary;
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"Codebase loaded: {summary.TotalProjects} projects, {summary.TotalClasses} classes");
 
-                    // Try to extract target class from requirement
+                    // Try to extract target class from story
                     var targetClassName = ExtractTargetClassName(content);
 
                     if (!string.IsNullOrEmpty(targetClassName))
                     {
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             $"Detected target class: {targetClassName}, finding references...");
 
                         classResult = await _codeAnalysisAgent.FindClassAsync(codebaseAnalysis, targetClassName, includeContent: true);
 
                         if (classResult.Found)
                         {
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"Found class at: {classResult.FilePath}");
 
                             referenceResult = await _codeAnalysisAgent.FindReferencesAsync(codebaseAnalysis, targetClassName, ct);
 
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"Found {referenceResult.References.Count} references in {referenceResult.AffectedFiles.Count} files");
                         }
                         else
                         {
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"Class '{targetClassName}' not found, will create new code");
                         }
                     }
@@ -399,20 +399,20 @@ public class PipelineService : IPipelineService
             // Phase 2: Planning (with codebase context if available)
             var planningResult = await ExecutePhaseAsync(execution, PipelinePhase.Planning, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Planning,
-                    "PlannerAgent decomposing requirements into tasks...");
+                await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Planning,
+                    "PlannerAgent decomposing storys into tasks...");
 
-                var projectState = new ProjectState { Requirement = content };
+                var projectState = new ProjectState { Story = content };
                 AgentResponse response;
 
                 if (codebaseAnalysis != null)
                 {
-                    _logger.LogInformation("[Planning] Using codebase-aware planning for: {CodebaseId}", requirement?.CodebaseId);
+                    _logger.LogInformation("[Planning] Using codebase-aware planning for: {CodebaseId}", story?.CodebaseId);
 
                     if (classResult?.Found == true && referenceResult != null)
                     {
                         // Modification planning with class/reference context
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             "Creating modification plan for existing class and references...");
 
                         var modificationTasks = await _codeAnalysisAgent.CreateModificationTasksAsync(
@@ -421,7 +421,7 @@ public class PipelineService : IPipelineService
                         response = await _plannerAgent.PlanModificationAsync(
                             content, classResult, referenceResult, modificationTasks, codebaseAnalysis, ct);
 
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             "Modification plan created - will update existing files");
                     }
                     else
@@ -444,7 +444,7 @@ public class PipelineService : IPipelineService
 
                 // Convert and save tasks (including modification metadata)
                 var tasks = ConvertToTaskDtos(response.Data);
-                await _taskRepository.SaveTasksAsync(requirementId, tasks, ct);
+                await _taskRepository.SaveTasksAsync(storyId, tasks, ct);
 
                 var modificationCount = tasks.Count(t => t.IsModification);
 
@@ -460,20 +460,20 @@ public class PipelineService : IPipelineService
             if (!planningResult.Approved) return;
 
             // Approve plan
-            await _approvalRepository.ApprovePlanAsync(requirementId, ct);
+            await _approvalRepository.ApprovePlanAsync(storyId, ct);
 
             // Phase 2: Coding (with modification support and parallel execution by project)
             var codingResult = await ExecutePhaseAsync(execution, PipelinePhase.Coding, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding, "Generating/Modifying code...");
+                await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Coding, "Generating/Modifying code...");
 
-                var allTasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+                var allTasks = (await _taskRepository.GetByStoryAsync(storyId, ct)).ToList();
 
                 // Only process PENDING tasks (Original tasks at first run)
                 // This ensures we don't re-process tasks on retry
                 var tasks = allTasks.Where(t => t.Status == Models.TaskStatus.Pending).ToList();
 
-                var projectState = new ProjectState { Requirement = content };
+                var projectState = new ProjectState { Story = content };
                 var generatedFiles = new ConcurrentDictionary<string, string>();
                 var modifiedFiles = new ConcurrentDictionary<string, string>();
 
@@ -481,7 +481,7 @@ public class PipelineService : IPipelineService
                 var hasModifications = tasks.Any(t => t.IsModification);
                 if (hasModifications)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         "Mode: MODIFICATION - will update existing files in the codebase");
                 }
 
@@ -489,7 +489,7 @@ public class PipelineService : IPipelineService
                 var projectGroups = GroupTasksByProject(tasks);
                 var completedProjects = new ConcurrentDictionary<string, bool>();
 
-                await _notificationService.NotifyProgressAsync(requirementId,
+                await _notificationService.NotifyProgressAsync(storyId,
                     $"Found {projectGroups.Count} project(s): {string.Join(", ", projectGroups.Select(g => g.ProjectName))}");
 
                 // Process projects in dependency order, parallelize where possible
@@ -499,7 +499,7 @@ public class PipelineService : IPipelineService
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"Processing level {level.Key + 1}: {string.Join(", ", level.Value.Select(g => g.ProjectName))} (parallel)");
 
                     // Process all projects in this level in parallel
@@ -512,14 +512,14 @@ public class PipelineService : IPipelineService
                             ct.ThrowIfCancellationRequested();
 
                             var actionType = task.IsModification ? "Modifying" : "Generating";
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"[{projectGroup.ProjectName}] {actionType}: {task.Title}");
 
                             // Use modification-aware coding if codebase is available
                             AgentResponse response;
-                            if (codebaseAnalysis != null && !string.IsNullOrEmpty(requirement?.CodebaseId))
+                            if (codebaseAnalysis != null && !string.IsNullOrEmpty(story?.CodebaseId))
                             {
-                                response = await ExecuteModificationCodingAsync(task, projectState, requirement.CodebaseId, codebaseAnalysis, ct);
+                                response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, ct);
                             }
                             else
                             {
@@ -562,11 +562,11 @@ public class PipelineService : IPipelineService
 
                             // Update task status
                             task.Status = Models.TaskStatus.Completed;
-                            await _taskRepository.UpdateTaskAsync(requirementId, task, ct);
+                            await _taskRepository.UpdateTaskAsync(storyId, task, ct);
                         }
 
                         completedProjects[projectGroup.ProjectName] = true;
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             $"[{projectGroup.ProjectName}] Completed ({projectFiles.Count} files)");
 
                         return projectFiles;
@@ -584,8 +584,8 @@ public class PipelineService : IPipelineService
 
                 // Save output
                 var outputPath = await _outputRepository.SaveOutputAsync(
-                    requirementId,
-                    requirement?.Name ?? requirementId,
+                    storyId,
+                    story?.Name ?? storyId,
                     generatedFiles.ToDictionary(k => k.Key, v => v.Value),
                     ct);
 
@@ -611,14 +611,14 @@ public class PipelineService : IPipelineService
             // Phase 4: Debugging (DebuggerAgent - verify and fix code)
             var debugResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging,
+                await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Debugging,
                     "DebuggerAgent verifying and fixing code...");
 
-                var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                var files = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
 
                 if (files.Count == 0)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId, "No files to verify");
+                    await _notificationService.NotifyProgressAsync(storyId, "No files to verify");
                     return new
                     {
                         Success = true,
@@ -627,7 +627,7 @@ public class PipelineService : IPipelineService
                     };
                 }
 
-                await _notificationService.NotifyProgressAsync(requirementId, $"Building {files.Count} files together...");
+                await _notificationService.NotifyProgressAsync(storyId, $"Building {files.Count} files together...");
 
                 // Use multi-file debugging - compile all files together in a single project
                 // This allows test files to reference their implementation files
@@ -637,7 +637,7 @@ public class PipelineService : IPipelineService
 
                 if (debugResponse.Success)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId, "All files compiled successfully!");
+                    await _notificationService.NotifyProgressAsync(storyId, "All files compiled successfully!");
 
                     // Update files if they were fixed
                     if (debugResponse.Data.TryGetValue("files", out var fixedFilesObj) &&
@@ -656,7 +656,7 @@ public class PipelineService : IPipelineService
                 }
                 else
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"Build failed: {debugResponse.Error ?? "Unknown error"}");
                 }
 
@@ -679,12 +679,12 @@ public class PipelineService : IPipelineService
             // Phase 5: Review (ReviewerAgent - quality check)
             var reviewResult = await ExecutePhaseAsync(execution, PipelinePhase.Reviewing, async () =>
             {
-                await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Reviewing, "Running code review...");
+                await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Reviewing, "Running code review...");
 
-                var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                var files = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
                 var projectState = new ProjectState
                 {
-                    Requirement = content,
+                    Story = content,
                     Codebase = files
                 };
 
@@ -697,7 +697,7 @@ public class PipelineService : IPipelineService
                 var response = await _reviewerAgent.RunAsync(request, ct);
                 if (response.Success)
                 {
-                    await _outputRepository.SaveReviewReportAsync(requirementId, response.Output, ct);
+                    await _outputRepository.SaveReviewReportAsync(storyId, response.Output, ct);
                 }
 
                 return new
@@ -712,7 +712,7 @@ public class PipelineService : IPipelineService
 
             // Phase 6: Deployment (DeploymentAgent - deploy to codebase and build)
             // Only run if a codebase is associated
-            var deployCodebaseId = requirement.CodebaseId;
+            var deployCodebaseId = story.CodebaseId;
             if (!string.IsNullOrEmpty(deployCodebaseId))
             {
                 // Store deployment result for potential rollback
@@ -720,7 +720,7 @@ public class PipelineService : IPipelineService
 
                 var deployResult = await ExecutePhaseAsync(execution, PipelinePhase.Deployment, async () =>
                 {
-                    await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Deployment,
+                    await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Deployment,
                         "DeploymentAgent deploying to codebase...");
 
                     // Get the codebase path
@@ -734,12 +734,12 @@ public class PipelineService : IPipelineService
                         };
                     }
 
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Deploying to: {codebaseAnalysis.CodebasePath}");
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId, $"Deploying to: {codebaseAnalysis.CodebasePath}");
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"Found {codebaseAnalysis.Projects.Count} projects in codebase");
 
                     // Get generated files
-                    var files = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                    var files = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
                     if (files.Count == 0)
                     {
                         return new
@@ -749,7 +749,7 @@ public class PipelineService : IPipelineService
                         };
                     }
 
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Deploying {files.Count} files...");
+                    await _notificationService.NotifyProgressAsync(storyId, $"Deploying {files.Count} files...");
 
                     // Deploy files to codebase using full analysis for accurate project paths
                     var deploymentResult = await _deploymentAgent.DeployAsync(codebaseAnalysis, files, ct);
@@ -759,12 +759,12 @@ public class PipelineService : IPipelineService
 
                     if (deploymentResult.Success)
                     {
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             $"Deployment successful! {deploymentResult.TotalFilesCopied} files deployed, build passed.");
                     }
                     else
                     {
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             $"Deployment failed: {deploymentResult.Error}");
                     }
 
@@ -789,26 +789,26 @@ public class PipelineService : IPipelineService
                 {
                     if (lastDeploymentResult != null && lastDeploymentResult.TotalFilesCopied > 0)
                     {
-                        _logger.LogInformation("[{RequirementId}] Deployment rejected, starting rollback...", requirementId);
-                        await _notificationService.NotifyProgressAsync(requirementId, "Rolling back deployment changes...");
+                        _logger.LogInformation("[{StoryId}] Deployment rejected, starting rollback...", storyId);
+                        await _notificationService.NotifyProgressAsync(storyId, "Rolling back deployment changes...");
 
                         var rollbackResult = await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
 
                         if (rollbackResult.Success)
                         {
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"Rollback complete: {rollbackResult.DeletedFiles.Count} files deleted, {rollbackResult.RevertedProjects.Count} projects reverted");
                         }
                         else
                         {
-                            await _notificationService.NotifyProgressAsync(requirementId,
+                            await _notificationService.NotifyProgressAsync(storyId,
                                 $"Rollback had errors: {string.Join(", ", rollbackResult.Errors)}");
                         }
                     }
 
-                    // Mark requirement as failed
-                    await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
-                    await _notificationService.NotifyPhaseFailedAsync(requirementId, PipelinePhase.Deployment,
+                    // Mark story as failed
+                    await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
+                    await _notificationService.NotifyPhaseFailedAsync(storyId, PipelinePhase.Deployment,
                         execution.RejectionReason ?? "Deployment rejected by user");
 
                     return;
@@ -829,7 +829,7 @@ public class PipelineService : IPipelineService
                         // Rollback and retry from Coding phase
                         await HandleRetryAsync(execution, integrationTestResult.FixTasks!, ct);
 
-                        await _notificationService.NotifyProgressAsync(requirementId,
+                        await _notificationService.NotifyProgressAsync(storyId,
                             $"🔄 Restarting from Coding phase with fix tasks...");
 
                         // CRITICAL: Re-execute Coding phase with fix tasks
@@ -847,7 +847,7 @@ public class PipelineService : IPipelineService
                         }
 
                         // Re-run the pipeline from Coding phase (recursive call with retry context)
-                        await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, requirement, ct);
+                        await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, story, ct);
                         return;
                     }
 
@@ -856,7 +856,7 @@ public class PipelineService : IPipelineService
                     {
                         await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
                     }
-                    await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+                    await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
                     return;
                 }
 
@@ -870,7 +870,7 @@ public class PipelineService : IPipelineService
 
                 var prInfo = new
                 {
-                    BranchName = $"feature/ai-{requirement?.Name?.ToLowerInvariant().Replace(" ", "-") ?? requirementId}",
+                    BranchName = $"feature/ai-{story?.Name?.ToLowerInvariant().Replace(" ", "-") ?? storyId}",
                     FileCount = lastDeploymentResult?.TotalFilesCopied ?? 0,
                     NewFiles = lastDeploymentResult?.NewFilesCreated ?? 0,
                     ModifiedFiles = lastDeploymentResult?.FilesModified ?? 0,
@@ -881,7 +881,7 @@ public class PipelineService : IPipelineService
                 prPhaseStatus.Result = prInfo;
 
                 await _notificationService.NotifyPhasePendingApprovalAsync(
-                    requirementId,
+                    storyId,
                     PipelinePhase.PullRequest,
                     $"Deployment successful! {prInfo.FileCount} files deployed. Create GitHub PR or complete?",
                     prInfo);
@@ -901,7 +901,7 @@ public class PipelineService : IPipelineService
                 if (createPr)
                 {
                     // TODO: Implement actual GitHub PR creation
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         "GitHub PR integration coming soon. For now, changes are deployed to codebase.");
                     prPhaseStatus.State = PhaseState.Completed;
                     prPhaseStatus.Message = "PR creation skipped (not yet implemented)";
@@ -911,47 +911,47 @@ public class PipelineService : IPipelineService
                     // User chose to complete without PR
                     prPhaseStatus.State = PhaseState.Skipped;
                     prPhaseStatus.Message = "Completed without PR";
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         "Completing without GitHub PR. Changes are deployed to codebase.");
                 }
 
                 prPhaseStatus.CompletedAt = DateTime.UtcNow;
-                await _notificationService.NotifyPhaseCompletedAsync(requirementId, PipelinePhase.PullRequest,
+                await _notificationService.NotifyPhaseCompletedAsync(storyId, PipelinePhase.PullRequest,
                     createPr ? "PR phase completed" : "Completed without PR");
             }
 
             // Mark as completed (this also clears InProgress)
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Completed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Completed, ct);
 
-            var outputPath = await _outputRepository.GetOutputPathAsync(requirementId, ct);
-            await _notificationService.NotifyPipelineCompletedAsync(requirementId, outputPath ?? "");
+            var outputPath = await _outputRepository.GetOutputPathAsync(storyId, ct);
+            await _notificationService.NotifyPipelineCompletedAsync(storyId, outputPath ?? "");
 
             execution.Status.CurrentPhase = PipelinePhase.Completed;
             execution.Status.CompletedAt = DateTime.UtcNow;
             execution.Status.IsRunning = false;
 
             // Store completed status for later retrieval (in-memory)
-            _completedPipelines[requirementId] = CloneStatus(execution.Status);
+            _completedPipelines[storyId] = CloneStatus(execution.Status);
 
             // Save pipeline history to disk for permanent access
-            await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
+            await _outputRepository.SavePipelineHistoryAsync(storyId, execution.Status, ct);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("[{RequirementId}] Pipeline cancelled", requirementId);
-            await _approvalRepository.ResetInProgressAsync(requirementId, CancellationToken.None);
+            _logger.LogInformation("[{StoryId}] Pipeline cancelled", storyId);
+            await _approvalRepository.ResetInProgressAsync(storyId, CancellationToken.None);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[{RequirementId}] Pipeline failed", requirementId);
-            await _notificationService.NotifyPhaseFailedAsync(requirementId, execution.CurrentPhase, ex.Message);
-            await _approvalRepository.ResetInProgressAsync(requirementId, CancellationToken.None);
+            _logger.LogError(ex, "[{StoryId}] Pipeline failed", storyId);
+            await _notificationService.NotifyPhaseFailedAsync(storyId, execution.CurrentPhase, ex.Message);
+            await _approvalRepository.ResetInProgressAsync(storyId, CancellationToken.None);
         }
         finally
         {
             execution.Status.IsRunning = false;
-            _runningPipelines.TryRemove(requirementId, out _);
-            await _notificationService.NotifyRequirementListChangedAsync();
+            _runningPipelines.TryRemove(storyId, out _);
+            await _notificationService.NotifyStoryListChangedAsync();
         }
     }
 
@@ -976,7 +976,7 @@ public class PipelineService : IPipelineService
             phaseStatus.State = PhaseState.WaitingApproval;
 
             await _notificationService.NotifyPhasePendingApprovalAsync(
-                execution.RequirementId, phase,
+                execution.StoryId, phase,
                 $"{phase} completed. Waiting for approval...",
                 result);
 
@@ -996,7 +996,7 @@ public class PipelineService : IPipelineService
             {
                 phaseStatus.State = PhaseState.Completed;
                 phaseStatus.CompletedAt = DateTime.UtcNow;
-                await _notificationService.NotifyPhaseCompletedAsync(execution.RequirementId, phase, $"{phase} approved");
+                await _notificationService.NotifyPhaseCompletedAsync(execution.StoryId, phase, $"{phase} approved");
             }
             else
             {
@@ -1014,11 +1014,11 @@ public class PipelineService : IPipelineService
         }
     }
 
-    private PipelineStatusDto CreateInitialStatus(string requirementId)
+    private PipelineStatusDto CreateInitialStatus(string storyId)
     {
         return new PipelineStatusDto
         {
-            RequirementId = requirementId,
+            StoryId = storyId,
             CurrentPhase = PipelinePhase.None,
             IsRunning = false,
             Phases = new List<PhaseStatusDto>
@@ -1096,7 +1096,7 @@ public class PipelineService : IPipelineService
 
     private class PipelineExecution
     {
-        public string RequirementId { get; set; } = string.Empty;
+        public string StoryId { get; set; } = string.Empty;
         public bool AutoApproveAll { get; set; }
         public PipelineStatusDto Status { get; set; } = new();
         public PipelinePhase CurrentPhase { get; set; }
@@ -1196,10 +1196,10 @@ public class PipelineService : IPipelineService
     }
 
     /// <summary>
-    /// Try to extract a class name from the requirement text for modification planning.
+    /// Try to extract a class name from the story text for modification planning.
     /// Returns null if no specific class is mentioned.
     /// </summary>
-    private string? ExtractTargetClassName(string requirement)
+    private string? ExtractTargetClassName(string story)
     {
         // Common words to exclude (not class names)
         var excludeWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1211,7 +1211,7 @@ public class PipelineService : IPipelineService
 
         // Pattern 1: Look for PascalCase class names (e.g., DigitalApiClient, LogRotator)
         var pascalCasePattern = @"\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b";
-        var pascalMatches = System.Text.RegularExpressions.Regex.Matches(requirement, pascalCasePattern);
+        var pascalMatches = System.Text.RegularExpressions.Regex.Matches(story, pascalCasePattern);
         foreach (System.Text.RegularExpressions.Match match in pascalMatches)
         {
             var className = match.Groups[1].Value;
@@ -1233,7 +1233,7 @@ public class PipelineService : IPipelineService
         foreach (var pattern in patterns)
         {
             var match = System.Text.RegularExpressions.Regex.Match(
-                requirement, pattern, System.Text.RegularExpressions.RegexOptions.None);
+                story, pattern, System.Text.RegularExpressions.RegexOptions.None);
 
             if (match.Success)
             {
@@ -1246,7 +1246,7 @@ public class PipelineService : IPipelineService
             }
         }
 
-        _logger.LogInformation("[ExtractClassName] No class name detected in requirement");
+        _logger.LogInformation("[ExtractClassName] No class name detected in story");
         return null;
     }
 
@@ -1254,18 +1254,18 @@ public class PipelineService : IPipelineService
     /// Execute modification-aware planning using CodeAnalysisAgent
     /// </summary>
     private async Task<AgentResponse> ExecuteModificationPlanningAsync(
-        string requirement,
+        string story,
         string codebaseId,
         Core.Models.CodebaseAnalysis analysis,
         CancellationToken ct)
     {
-        // Try to extract the target class name from the requirement
-        var targetClassName = ExtractTargetClassName(requirement);
+        // Try to extract the target class name from the story
+        var targetClassName = ExtractTargetClassName(story);
 
         if (string.IsNullOrEmpty(targetClassName))
         {
-            _logger.LogInformation("[Planning] No specific class detected in requirement, using standard planning");
-            return await _plannerAgent.PlanWithCodebaseAsync(requirement, analysis, null, ct);
+            _logger.LogInformation("[Planning] No specific class detected in story, using standard planning");
+            return await _plannerAgent.PlanWithCodebaseAsync(story, analysis, null, ct);
         }
 
         _logger.LogInformation("[Planning] Detected target class: {ClassName}, searching for references", targetClassName);
@@ -1276,7 +1276,7 @@ public class PipelineService : IPipelineService
         if (!classResult.Found)
         {
             _logger.LogWarning("[Planning] Class {ClassName} not found in codebase, using standard planning", targetClassName);
-            return await _plannerAgent.PlanWithCodebaseAsync(requirement, analysis, null, ct);
+            return await _plannerAgent.PlanWithCodebaseAsync(story, analysis, null, ct);
         }
 
         _logger.LogInformation("[Planning] Found class {ClassName} at {FilePath}", targetClassName, classResult.FilePath);
@@ -1289,11 +1289,11 @@ public class PipelineService : IPipelineService
 
         // Create modification tasks
         var modificationTasks = await _codeAnalysisAgent.CreateModificationTasksAsync(
-            analysis, referenceResult, $"Modification for: {requirement}", ct);
+            analysis, referenceResult, $"Modification for: {story}", ct);
 
         // Use modification planning
         return await _plannerAgent.PlanModificationAsync(
-            requirement,
+            story,
             classResult,
             referenceResult,
             modificationTasks,
@@ -1425,7 +1425,7 @@ public class PipelineService : IPipelineService
         DeploymentResult deploymentResult,
         CancellationToken ct)
     {
-        var requirementId = execution.RequirementId;
+        var storyId = execution.StoryId;
         execution.CurrentPhase = PipelinePhase.UnitTesting;
         execution.Status.CurrentPhase = PipelinePhase.UnitTesting;
 
@@ -1435,11 +1435,11 @@ public class PipelineService : IPipelineService
 
         try
         {
-            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.UnitTesting,
+            await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.UnitTesting,
                 "Running integration tests on deployed code (using UnitTestAgent)...");
 
             // Use UnitTestAgent to run tests in parallel for all affected test projects
-            await _notificationService.NotifyProgressAsync(requirementId,
+            await _notificationService.NotifyProgressAsync(storyId,
                 "UnitTestAgent: Discovering affected test projects and classes...");
 
             var testExecutionSummary = await _unitTestAgent.RunTestsAsync(codebaseAnalysis, deploymentResult, ct);
@@ -1447,26 +1447,26 @@ public class PipelineService : IPipelineService
             // Check if tests were skipped
             if (testExecutionSummary.Skipped)
             {
-                await _notificationService.NotifyProgressAsync(requirementId,
+                await _notificationService.NotifyProgressAsync(storyId,
                     $"Integration tests skipped: {testExecutionSummary.SkipReason}");
 
                 phaseStatus.State = PhaseState.Completed;
                 phaseStatus.CompletedAt = DateTime.UtcNow;
                 phaseStatus.Result = new { Skipped = true, Reason = testExecutionSummary.SkipReason };
 
-                await _notificationService.NotifyPhaseCompletedAsync(requirementId, PipelinePhase.UnitTesting,
+                await _notificationService.NotifyPhaseCompletedAsync(storyId, PipelinePhase.UnitTesting,
                     $"Integration testing skipped - {testExecutionSummary.SkipReason}", phaseStatus.Result);
 
                 return new PhaseResult { Approved = true, Result = phaseStatus.Result };
             }
 
             // Report test execution summary
-            await _notificationService.NotifyProgressAsync(requirementId,
+            await _notificationService.NotifyProgressAsync(storyId,
                 $"UnitTestAgent: Executed tests in {testExecutionSummary.ProjectResults.Count} project(s) in parallel");
 
             foreach (var projectResult in testExecutionSummary.ProjectResults)
             {
-                await _notificationService.NotifyProgressAsync(requirementId,
+                await _notificationService.NotifyProgressAsync(storyId,
                     $"  [{projectResult.ProjectName}] {projectResult.Passed}/{projectResult.TotalTests} passed" +
                     (projectResult.Failed > 0 ? $", {projectResult.Failed} failed" : ""));
             }
@@ -1475,23 +1475,23 @@ public class PipelineService : IPipelineService
             var testResults = ConvertToTestSummaryDto(testExecutionSummary);
 
             // Notify test results via SignalR
-            await _notificationService.NotifyTestResultsAsync(requirementId, testResults);
+            await _notificationService.NotifyTestResultsAsync(storyId, testResults);
 
             // Check for failures
             if (testResults.Failed > 0)
             {
-                _logger.LogWarning("[{RequirementId}] Integration tests failed: {Failed}/{Total}",
-                    requirementId, testResults.Failed, testResults.TotalTests);
+                _logger.LogWarning("[{StoryId}] Integration tests failed: {Failed}/{Total}",
+                    storyId, testResults.Failed, testResults.TotalTests);
 
                 // Generate fix tasks from test failures with LLM analysis
                 // LLM determines whether to fix test or implementation based on error analysis
-                await _notificationService.NotifyProgressAsync(requirementId, "🔍 Analyzing test failures with LLM to determine fix target...");
+                await _notificationService.NotifyProgressAsync(storyId, "🔍 Analyzing test failures with LLM to determine fix target...");
                 var fixTasks = await GenerateFixTasksFromTestFailuresAsync(testResults, execution.GeneratedFiles, codebaseAnalysis, deploymentResult, ct);
 
                 // Check if this is a breaking change (existing tests failing)
                 if (testResults.IsBreakingChange)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId,
+                    await _notificationService.NotifyProgressAsync(storyId,
                         $"⚠️ BREAKING CHANGE: {testResults.ExistingTestsFailed} existing test(s) now failing!");
                 }
 
@@ -1511,9 +1511,9 @@ public class PipelineService : IPipelineService
                 execution.Status.RetryInfo = retryInfo;
                 execution.Status.RetryTargetPhase = PipelinePhase.Coding;
 
-                // Notify about retry requirement
-                await _notificationService.NotifyRetryRequiredAsync(requirementId, PipelinePhase.UnitTesting, retryInfo);
-                await _notificationService.NotifyFixTasksGeneratedAsync(requirementId, fixTasks);
+                // Notify about retry story
+                await _notificationService.NotifyRetryRequiredAsync(storyId, PipelinePhase.UnitTesting, retryInfo);
+                await _notificationService.NotifyFixTasksGeneratedAsync(storyId, fixTasks);
 
                 phaseStatus.State = PhaseState.WaitingRetryApproval;
                 phaseStatus.Result = new
@@ -1583,7 +1583,7 @@ public class PipelineService : IPipelineService
                 NewTestsPassed = testResults.NewTestsPassed
             };
 
-            await _notificationService.NotifyPhasePendingApprovalAsync(requirementId, PipelinePhase.UnitTesting,
+            await _notificationService.NotifyPhasePendingApprovalAsync(storyId, PipelinePhase.UnitTesting,
                 $"Integration tests passed! {testResults.Passed}/{testResults.TotalTests}", phaseStatus.Result);
 
             // Wait for approval
@@ -1602,7 +1602,7 @@ public class PipelineService : IPipelineService
             {
                 phaseStatus.State = PhaseState.Completed;
                 phaseStatus.CompletedAt = DateTime.UtcNow;
-                await _notificationService.NotifyPhaseCompletedAsync(requirementId, PipelinePhase.UnitTesting,
+                await _notificationService.NotifyPhaseCompletedAsync(storyId, PipelinePhase.UnitTesting,
                     "Integration testing approved");
             }
             else
@@ -2118,15 +2118,15 @@ Analyze the test failure and determine:
         List<FixTaskDto> fixTasks,
         CancellationToken ct)
     {
-        var requirementId = execution.RequirementId;
+        var storyId = execution.StoryId;
         execution.RetryAttempt++;
         execution.PendingFixTasks = fixTasks;
 
-        _logger.LogInformation("[{RequirementId}] Starting retry attempt {Attempt}/{Max}",
-            requirementId, execution.RetryAttempt, PipelineExecution.MaxRetryAttempts);
+        _logger.LogInformation("[{StoryId}] Starting retry attempt {Attempt}/{Max}",
+            storyId, execution.RetryAttempt, PipelineExecution.MaxRetryAttempts);
 
         await _notificationService.NotifyRetryStartingAsync(
-            requirementId, execution.RetryAttempt, PipelineExecution.MaxRetryAttempts, PipelinePhase.Coding);
+            storyId, execution.RetryAttempt, PipelineExecution.MaxRetryAttempts, PipelinePhase.Coding);
 
         // Convert fix tasks to regular tasks BEFORE rollback 
         // so we preserve the existing code content for LLM
@@ -2157,12 +2157,12 @@ Analyze the test failure and determine:
         // Rollback deployment if needed
         if (execution.LastDeploymentResult != null && execution.LastDeploymentResult.TotalFilesCopied > 0)
         {
-            await _notificationService.NotifyProgressAsync(requirementId, "Rolling back deployment for retry...");
+            await _notificationService.NotifyProgressAsync(storyId, "Rolling back deployment for retry...");
             await _deploymentAgent.RollbackAsync(execution.LastDeploymentResult, ct);
         }
 
         // Append fix tasks to existing tasks (preserves original tasks)
-        await _taskRepository.AppendFixTasksAsync(requirementId, tasks, execution.RetryAttempt, ct);
+        await _taskRepository.AppendFixTasksAsync(storyId, tasks, execution.RetryAttempt, ct);
 
         // Reset phases after Coding to Pending
         foreach (var phase in execution.Status.Phases)
@@ -2180,7 +2180,7 @@ Analyze the test failure and determine:
         execution.Status.RetryInfo = null;
         execution.Status.RetryTargetPhase = null;
 
-        await _notificationService.NotifyProgressAsync(requirementId,
+        await _notificationService.NotifyProgressAsync(storyId,
             $"Retry prepared with {fixTasks.Count} fix task(s). Returning to Coding phase...");
     }
 
@@ -2190,25 +2190,25 @@ Analyze the test failure and determine:
     private async Task ExecuteRetryFromCodingAsync(
         PipelineExecution execution,
         Core.Models.CodebaseAnalysis? codebaseAnalysis,
-        RequirementDto? requirement,
+        StoryDto? story,
         CancellationToken ct)
     {
-        var requirementId = execution.RequirementId;
-        var content = await _requirementRepository.GetContentAsync(requirementId, ct);
+        var storyId = execution.StoryId;
+        var content = await _storyRepository.GetContentAsync(storyId, ct);
 
-        _logger.LogInformation("[{RequirementId}] Executing retry from Coding phase (Attempt {Attempt})",
-            requirementId, execution.RetryAttempt);
+        _logger.LogInformation("[{StoryId}] Executing retry from Coding phase (Attempt {Attempt})",
+            storyId, execution.RetryAttempt);
 
-        await _notificationService.NotifyProgressAsync(requirementId,
+        await _notificationService.NotifyProgressAsync(storyId,
             $"🔄 RETRY {execution.RetryAttempt}/{PipelineExecution.MaxRetryAttempts} - Starting Coding phase with fix tasks...");
 
         // Phase: Coding (with fix tasks)
         var codingResult = await ExecutePhaseAsync(execution, PipelinePhase.Coding, async () =>
         {
-            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding,
+            await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Coding,
                 $"Retry #{execution.RetryAttempt} - Fixing code based on test failures...");
 
-            var allTasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+            var allTasks = (await _taskRepository.GetByStoryAsync(storyId, ct)).ToList();
 
             // CRITICAL: Only process FIX tasks that are PENDING for this retry attempt
             // Do NOT re-process original tasks or already completed fix tasks
@@ -2218,7 +2218,7 @@ Analyze the test failure and determine:
                            t.RetryAttempt == execution.RetryAttempt)
                 .ToList();
 
-            var projectState = new ProjectState { Requirement = content ?? "" };
+            var projectState = new ProjectState { Story = content ?? "" };
             var generatedFiles = new ConcurrentDictionary<string, string>();
 
             // CRITICAL: Load previously generated files from original coding phase
@@ -2230,29 +2230,29 @@ Analyze the test failure and determine:
                     generatedFiles[kvp.Key] = kvp.Value;
                     projectState.Codebase[kvp.Key] = kvp.Value;
                 }
-                _logger.LogInformation("[{RequirementId}] Loaded {Count} previously generated files for retry",
-                    requirementId, execution.GeneratedFiles.Count);
+                _logger.LogInformation("[{StoryId}] Loaded {Count} previously generated files for retry",
+                    storyId, execution.GeneratedFiles.Count);
             }
 
             // Load previously generated files into project state (from completed original tasks)
             var completedTasks = allTasks.Where(t => t.Status == Models.TaskStatus.Completed).ToList();
-            _logger.LogInformation("[{RequirementId}] Retry: {CompletedCount} completed tasks, {FixCount} pending fix tasks to process",
-                requirementId, completedTasks.Count, fixTasks.Count);
+            _logger.LogInformation("[{StoryId}] Retry: {CompletedCount} completed tasks, {FixCount} pending fix tasks to process",
+                storyId, completedTasks.Count, fixTasks.Count);
 
-            await _notificationService.NotifyProgressAsync(requirementId,
+            await _notificationService.NotifyProgressAsync(storyId,
                 $"Processing {fixTasks.Count} fix task(s) with {execution.GeneratedFiles?.Count ?? 0} existing files...");
 
             foreach (var task in fixTasks)
             {
                 ct.ThrowIfCancellationRequested();
 
-                await _notificationService.NotifyProgressAsync(requirementId, $"Fixing: {task.Title}");
+                await _notificationService.NotifyProgressAsync(storyId, $"Fixing: {task.Title}");
 
                 // Use modification-aware coding if codebase is available
                 AgentResponse response;
-                if (codebaseAnalysis != null && !string.IsNullOrEmpty(requirement?.CodebaseId))
+                if (codebaseAnalysis != null && !string.IsNullOrEmpty(story?.CodebaseId))
                 {
-                    response = await ExecuteModificationCodingAsync(task, projectState, requirement.CodebaseId, codebaseAnalysis, ct);
+                    response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, ct);
                 }
                 else
                 {
@@ -2278,11 +2278,11 @@ Analyze the test failure and determine:
                     }
 
                     generatedFiles[fileKey] = code.ToString()!;
-                    _logger.LogInformation("[{RequirementId}] Fix task added file: {FileKey}", requirementId, fileKey);
+                    _logger.LogInformation("[{StoryId}] Fix task added file: {FileKey}", storyId, fileKey);
                 }
 
                 task.Status = Models.TaskStatus.Completed;
-                await _taskRepository.UpdateTaskAsync(requirementId, task, ct);
+                await _taskRepository.UpdateTaskAsync(storyId, task, ct);
             }
 
             // Update project state
@@ -2294,13 +2294,13 @@ Analyze the test failure and determine:
             // CRITICAL: Update execution.GeneratedFiles with ALL files (original + fixed)
             // This ensures next phases (deployment, testing) have complete file set
             execution.GeneratedFiles = generatedFiles.ToDictionary(k => k.Key, v => v.Value);
-            _logger.LogInformation("[{RequirementId}] Updated GeneratedFiles with {Count} total files after fix",
-                requirementId, execution.GeneratedFiles.Count);
+            _logger.LogInformation("[{StoryId}] Updated GeneratedFiles with {Count} total files after fix",
+                storyId, execution.GeneratedFiles.Count);
 
             // Save output
             var outputPath = await _outputRepository.SaveOutputAsync(
-                requirementId,
-                requirement?.Name ?? requirementId,
+                storyId,
+                story?.Name ?? storyId,
                 generatedFiles.ToDictionary(k => k.Key, v => v.Value),
                 ct);
 
@@ -2316,20 +2316,20 @@ Analyze the test failure and determine:
 
         if (!codingResult.Approved)
         {
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
             return;
         }
 
         // Phase: Debugging - Debug ALL generated files together (original + fixed)
         var debuggingResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
         {
-            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging, "Checking for compilation errors...");
+            await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Debugging, "Checking for compilation errors...");
 
-            var projectState = new ProjectState { Requirement = content ?? "" };
+            var projectState = new ProjectState { Story = content ?? "" };
 
             // Get ALL generated files (original + fixed)
-            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
-            _logger.LogInformation("[{RequirementId}] Debugging {Count} files (original + fixed)", requirementId, outputFiles.Count);
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
+            _logger.LogInformation("[{StoryId}] Debugging {Count} files (original + fixed)", storyId, outputFiles.Count);
 
             foreach (var kvp in outputFiles)
             {
@@ -2343,12 +2343,12 @@ Analyze the test failure and determine:
                 // Skip test files for debugging (they don't need to compile standalone)
                 if (file.Key.Contains("Test", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogInformation("[{RequirementId}] Skipping test file for debug: {File}", requirementId, file.Key);
+                    _logger.LogInformation("[{StoryId}] Skipping test file for debug: {File}", storyId, file.Key);
                     debugResults[file.Key] = true;
                     continue;
                 }
 
-                _logger.LogInformation("[{RequirementId}] Debugging file: {File}", requirementId, file.Key);
+                _logger.LogInformation("[{StoryId}] Debugging file: {File}", storyId, file.Key);
                 var response = await _debuggerAgent.RunAsync(
                     new AgentRequest { Input = file.Value, ProjectState = projectState },
                     ct);
@@ -2356,7 +2356,7 @@ Analyze the test failure and determine:
                 debugResults[file.Key] = response.Success;
                 if (!response.Success)
                 {
-                    await _notificationService.NotifyProgressAsync(requirementId, $"Debug issues found for {Path.GetFileName(file.Key)}, fixing...");
+                    await _notificationService.NotifyProgressAsync(storyId, $"Debug issues found for {Path.GetFileName(file.Key)}, fixing...");
                 }
             }
 
@@ -2370,21 +2370,21 @@ Analyze the test failure and determine:
 
         if (!debuggingResult.Approved)
         {
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
             return;
         }
 
         // Phase: Reviewing
         var reviewResult = await ExecutePhaseAsync(execution, PipelinePhase.Reviewing, async () =>
         {
-            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Reviewing, "Reviewing generated code...");
+            await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Reviewing, "Reviewing generated code...");
 
-            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
             var reviewSummary = new Dictionary<string, object>();
 
             foreach (var file in outputFiles)
             {
-                var projectState = new ProjectState { Requirement = content ?? "" };
+                var projectState = new ProjectState { Story = content ?? "" };
                 projectState.Codebase[file.Key] = file.Value;
 
                 var response = await _reviewerAgent.RunAsync(
@@ -2402,7 +2402,7 @@ Analyze the test failure and determine:
 
         if (!reviewResult.Approved)
         {
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
             return;
         }
 
@@ -2410,9 +2410,9 @@ Analyze the test failure and determine:
         DeploymentResult? lastDeploymentResult = null;
         var deploymentResult = await ExecutePhaseAsync(execution, PipelinePhase.Deployment, async () =>
         {
-            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Deployment, "Deploying retry code to codebase...");
+            await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Deployment, "Deploying retry code to codebase...");
 
-            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
             if (codebaseAnalysis == null)
             {
                 throw new InvalidOperationException("Codebase analysis is required for deployment");
@@ -2442,7 +2442,7 @@ Analyze the test failure and determine:
             {
                 await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
             }
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
             return;
         }
 
@@ -2470,7 +2470,7 @@ Analyze the test failure and determine:
                 }
 
                 // Recursive retry
-                await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, requirement, ct);
+                await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, story, ct);
                 return;
             }
 
@@ -2479,7 +2479,7 @@ Analyze the test failure and determine:
             {
                 await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
             }
-            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Failed, ct);
             return;
         }
 
@@ -2492,7 +2492,7 @@ Analyze the test failure and determine:
 
         var prInfo = new
         {
-            BranchName = $"feature/ai-{requirement?.Name?.ToLowerInvariant().Replace(" ", "-") ?? requirementId}",
+            BranchName = $"feature/ai-{story?.Name?.ToLowerInvariant().Replace(" ", "-") ?? storyId}",
             FilesDeployed = lastDeploymentResult?.TotalFilesCopied ?? 0,
             NewFiles = lastDeploymentResult?.NewFilesCreated ?? 0,
             ModifiedFiles = lastDeploymentResult?.FilesModified ?? 0,
@@ -2503,7 +2503,7 @@ Analyze the test failure and determine:
         prPhaseStatus.Result = prInfo;
         prPhaseStatus.Message = $"Retry #{execution.RetryAttempt} successful! {prInfo.FilesDeployed} files deployed. Create PR?";
 
-        await _notificationService.NotifyPhaseCompletedAsync(requirementId, PipelinePhase.PullRequest,
+        await _notificationService.NotifyPhaseCompletedAsync(storyId, PipelinePhase.PullRequest,
             prPhaseStatus.Message, prInfo);
 
         // Wait for user decision
@@ -2533,19 +2533,19 @@ Analyze the test failure and determine:
         execution.Status.CompletedAt = DateTime.UtcNow;
 
         // Store completed status for later retrieval (in-memory)
-        _completedPipelines[requirementId] = CloneStatus(execution.Status);
+        _completedPipelines[storyId] = CloneStatus(execution.Status);
 
         // Save pipeline history to disk for permanent access
-        await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
+        await _outputRepository.SavePipelineHistoryAsync(storyId, execution.Status, ct);
 
-        await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Completed, ct);
+        await _storyRepository.UpdateStatusAsync(storyId, StoryStatus.Completed, ct);
 
-        var outputPath = await _outputRepository.GetOutputPathAsync(requirementId, ct);
-        await _notificationService.NotifyPipelineCompletedAsync(requirementId, outputPath ?? "");
-        await _notificationService.NotifyRequirementListChangedAsync();
+        var outputPath = await _outputRepository.GetOutputPathAsync(storyId, ct);
+        await _notificationService.NotifyPipelineCompletedAsync(storyId, outputPath ?? "");
+        await _notificationService.NotifyStoryListChangedAsync();
 
-        _logger.LogInformation("[{RequirementId}] Pipeline completed successfully after {RetryAttempts} retry(s)!",
-            requirementId, execution.RetryAttempt);
+        _logger.LogInformation("[{StoryId}] Pipeline completed successfully after {RetryAttempts} retry(s)!",
+            storyId, execution.RetryAttempt);
     }
 
     /// <summary>
@@ -2555,7 +2555,7 @@ Analyze the test failure and determine:
     {
         return new PipelineStatusDto
         {
-            RequirementId = original.RequirementId,
+            StoryId = original.StoryId,
             CurrentPhase = original.CurrentPhase,
             IsRunning = original.IsRunning,
             StartedAt = original.StartedAt,

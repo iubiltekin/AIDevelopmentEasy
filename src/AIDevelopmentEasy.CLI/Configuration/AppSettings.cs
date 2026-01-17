@@ -29,7 +29,7 @@ public class AzureOpenAISettings
 
 public class AIDevelopmentEasySettings
 {
-    public string RequirementsDirectory { get; set; } = "requirements";
+    public string StoriesDirectory { get; set; } = "stories";
     public string OutputDirectory { get; set; } = "output";
     public string CodingStandardsFile { get; set; } = "coding-standards.json";
     public string TargetLanguage { get; set; } = "csharp";
@@ -42,7 +42,7 @@ public class AIDevelopmentEasySettings
 public class ResolvedPaths
 {
     public string AppDataDirectory { get; }
-    public string RequirementsPath { get; }
+    public string StoriesPath { get; }
     public string OutputPath { get; }
     public string LogsPath { get; }
     public string PromptsPath { get; }
@@ -56,7 +56,7 @@ public class ResolvedPaths
         var programDataDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
         AppDataDirectory = Path.Combine(programDataDir, "AIDevelopmentEasy");
 
-        RequirementsPath = Path.Combine(AppDataDirectory, "requirements");
+        StoriesPath = Path.Combine(AppDataDirectory, "stories");
         OutputPath = Path.Combine(AppDataDirectory, "output");
         LogsPath = Path.Combine(AppDataDirectory, "logs");
         PromptsPath = Path.Combine(AppDataDirectory, "prompts");
@@ -65,7 +65,7 @@ public class ResolvedPaths
 
         // Ensure directories exist
         Directory.CreateDirectory(AppDataDirectory);
-        Directory.CreateDirectory(RequirementsPath);
+        Directory.CreateDirectory(StoriesPath);
         Directory.CreateDirectory(OutputPath);
         Directory.CreateDirectory(LogsPath);
         Directory.CreateDirectory(PromptsPath);

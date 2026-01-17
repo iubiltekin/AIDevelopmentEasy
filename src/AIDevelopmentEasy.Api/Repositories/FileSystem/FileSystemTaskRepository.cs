@@ -6,17 +6,17 @@ namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
 
 /// <summary>
 /// File system based implementation of ITaskRepository.
-/// Tasks are stored as JSON files in requirements/{id}/tasks/ directory.
+/// Tasks are stored as JSON files in stories/{id}/tasks/ directory.
 /// </summary>
 public class FileSystemTaskRepository : ITaskRepository
 {
-    private readonly string _requirementsPath;
+    private readonly string _storiesPath;
     private readonly ILogger<FileSystemTaskRepository> _logger;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public FileSystemTaskRepository(string requirementsPath, ILogger<FileSystemTaskRepository> logger)
+    public FileSystemTaskRepository(string storiesPath, ILogger<FileSystemTaskRepository> logger)
     {
-        _requirementsPath = requirementsPath;
+        _storiesPath = storiesPath;
         _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
@@ -25,10 +25,10 @@ public class FileSystemTaskRepository : ITaskRepository
         };
     }
 
-    public async Task<IEnumerable<TaskDto>> GetByRequirementAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<TaskDto>> GetByStoryAsync(string storyId, CancellationToken cancellationToken = default)
     {
         var tasks = new List<TaskDto>();
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
 
         if (!Directory.Exists(tasksDir))
             return tasks;
@@ -58,9 +58,9 @@ public class FileSystemTaskRepository : ITaskRepository
         return tasks;
     }
 
-    public async Task<TaskDto?> GetByIdAsync(string requirementId, int taskIndex, CancellationToken cancellationToken = default)
+    public async Task<TaskDto?> GetByIdAsync(string storyId, int taskIndex, CancellationToken cancellationToken = default)
     {
-        var filePath = GetTaskFilePath(requirementId, taskIndex);
+        var filePath = GetTaskFilePath(storyId, taskIndex);
         
         if (!File.Exists(filePath))
             return null;
@@ -72,14 +72,14 @@ public class FileSystemTaskRepository : ITaskRepository
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error reading task: {RequirementId}/{TaskIndex}", requirementId, taskIndex);
+            _logger.LogError(ex, "Error reading task: {StoryId}/{TaskIndex}", storyId, taskIndex);
             return null;
         }
     }
 
-    public async Task SaveTasksAsync(string requirementId, IEnumerable<TaskDto> tasks, CancellationToken cancellationToken = default)
+    public async Task SaveTasksAsync(string storyId, IEnumerable<TaskDto> tasks, CancellationToken cancellationToken = default)
     {
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
         
         // Ensure directory exists
         Directory.CreateDirectory(tasksDir);
@@ -99,29 +99,29 @@ public class FileSystemTaskRepository : ITaskRepository
             var task = taskList[i];
             task.Index = i + 1; // Ensure correct index
             
-            var filePath = GetTaskFilePath(requirementId, task.Index);
+            var filePath = GetTaskFilePath(storyId, task.Index);
             var json = JsonSerializer.Serialize(task, _jsonOptions);
             await File.WriteAllTextAsync(filePath, json, cancellationToken);
         }
 
-        _logger.LogInformation("Saved {Count} tasks for requirement: {RequirementId}", taskList.Count, requirementId);
+        _logger.LogInformation("Saved {Count} tasks for story: {StoryId}", taskList.Count, storyId);
     }
 
-    public async Task UpdateTaskAsync(string requirementId, TaskDto task, CancellationToken cancellationToken = default)
+    public async Task UpdateTaskAsync(string storyId, TaskDto task, CancellationToken cancellationToken = default)
     {
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
         Directory.CreateDirectory(tasksDir);
 
-        var filePath = GetTaskFilePath(requirementId, task.Index);
+        var filePath = GetTaskFilePath(storyId, task.Index);
         var json = JsonSerializer.Serialize(task, _jsonOptions);
         await File.WriteAllTextAsync(filePath, json, cancellationToken);
 
-        _logger.LogInformation("Updated task {Index} for requirement: {RequirementId}", task.Index, requirementId);
+        _logger.LogInformation("Updated task {Index} for story: {StoryId}", task.Index, storyId);
     }
 
-    public async Task AppendFixTasksAsync(string requirementId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default)
+    public async Task AppendFixTasksAsync(string storyId, IEnumerable<TaskDto> fixTasks, int retryAttempt, CancellationToken cancellationToken = default)
     {
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
         Directory.CreateDirectory(tasksDir);
 
         // Get current max index from existing tasks
@@ -148,31 +148,31 @@ public class FileSystemTaskRepository : ITaskRepository
             task.Type = TaskType.Fix;
             task.RetryAttempt = retryAttempt;
 
-            var filePath = GetTaskFilePath(requirementId, task.Index);
+            var filePath = GetTaskFilePath(storyId, task.Index);
             var json = JsonSerializer.Serialize(task, _jsonOptions);
             await File.WriteAllTextAsync(filePath, json, cancellationToken);
         }
 
-        _logger.LogInformation("Appended {Count} fix tasks (retry #{Retry}) for requirement: {RequirementId}. Total tasks: {Total}",
-            fixTaskList.Count, retryAttempt, requirementId, maxIndex + fixTaskList.Count);
+        _logger.LogInformation("Appended {Count} fix tasks (retry #{Retry}) for story: {StoryId}. Total tasks: {Total}",
+            fixTaskList.Count, retryAttempt, storyId, maxIndex + fixTaskList.Count);
     }
 
-    public Task DeleteAllAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task DeleteAllAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
         
         if (Directory.Exists(tasksDir))
         {
             Directory.Delete(tasksDir, recursive: true);
-            _logger.LogInformation("Deleted all tasks for requirement: {RequirementId}", requirementId);
+            _logger.LogInformation("Deleted all tasks for story: {StoryId}", storyId);
         }
 
         return Task.CompletedTask;
     }
 
-    public Task<bool> HasTasksAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<bool> HasTasksAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var tasksDir = GetTasksDirectory(requirementId);
+        var tasksDir = GetTasksDirectory(storyId);
         
         if (!Directory.Exists(tasksDir))
             return Task.FromResult(false);
@@ -180,13 +180,13 @@ public class FileSystemTaskRepository : ITaskRepository
         return Task.FromResult(Directory.GetFiles(tasksDir, "task-*.json").Length > 0);
     }
 
-    private string GetTasksDirectory(string requirementId)
+    private string GetTasksDirectory(string storyId)
     {
-        return Path.Combine(_requirementsPath, requirementId, "tasks");
+        return Path.Combine(_storiesPath, storyId, "tasks");
     }
 
-    private string GetTaskFilePath(string requirementId, int taskIndex)
+    private string GetTaskFilePath(string storyId, int taskIndex)
     {
-        return Path.Combine(GetTasksDirectory(requirementId), $"task-{taskIndex:D2}.json");
+        return Path.Combine(GetTasksDirectory(storyId), $"task-{taskIndex:D2}.json");
     }
 }

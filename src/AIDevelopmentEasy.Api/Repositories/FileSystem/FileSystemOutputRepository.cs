@@ -5,7 +5,7 @@ namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
 
 /// <summary>
 /// File system based implementation of IOutputRepository.
-/// Generated code is stored in output/{timestamp}_{requirementId}/ directory.
+/// Generated code is stored in output/{timestamp}_{storyId}/ directory.
 /// </summary>
 public class FileSystemOutputRepository : IOutputRepository
 {
@@ -23,10 +23,10 @@ public class FileSystemOutputRepository : IOutputRepository
         }
     }
 
-    public async Task<string> SaveOutputAsync(string requirementId, string projectName, Dictionary<string, string> files, CancellationToken cancellationToken = default)
+    public async Task<string> SaveOutputAsync(string storyId, string projectName, Dictionary<string, string> files, CancellationToken cancellationToken = default)
     {
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var outputDir = Path.Combine(_outputPath, $"{timestamp}_{requirementId}");
+        var outputDir = Path.Combine(_outputPath, $"{timestamp}_{storyId}");
         var projectDir = Path.Combine(outputDir, projectName);
 
         Directory.CreateDirectory(projectDir);
@@ -51,24 +51,24 @@ public class FileSystemOutputRepository : IOutputRepository
         return outputDir;
     }
 
-    public Task<string?> GetOutputPathAsync(string requirementId, CancellationToken cancellationToken = default)
+    public Task<string?> GetOutputPathAsync(string storyId, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(_outputPath))
             return Task.FromResult<string?>(null);
 
-        // Find the most recent output directory for this requirement
+        // Find the most recent output directory for this story
         var outputDir = Directory.GetDirectories(_outputPath)
-            .Where(d => Path.GetFileName(d).EndsWith($"_{requirementId}"))
+            .Where(d => Path.GetFileName(d).EndsWith($"_{storyId}"))
             .OrderByDescending(d => d)
             .FirstOrDefault();
 
         return Task.FromResult(outputDir);
     }
 
-    public async Task<Dictionary<string, string>> GetGeneratedFilesAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<Dictionary<string, string>> GetGeneratedFilesAsync(string storyId, CancellationToken cancellationToken = default)
     {
         var files = new Dictionary<string, string>();
-        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        var outputDir = await GetOutputPathAsync(storyId, cancellationToken);
 
         if (outputDir == null || !Directory.Exists(outputDir))
             return files;
@@ -88,15 +88,15 @@ public class FileSystemOutputRepository : IOutputRepository
         return files;
     }
 
-    public async Task SaveReviewReportAsync(string requirementId, string report, CancellationToken cancellationToken = default)
+    public async Task SaveReviewReportAsync(string storyId, string report, CancellationToken cancellationToken = default)
     {
-        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        var outputDir = await GetOutputPathAsync(storyId, cancellationToken);
         
         if (outputDir == null)
         {
             // Create a new output directory if none exists
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            outputDir = Path.Combine(_outputPath, $"{timestamp}_{requirementId}");
+            outputDir = Path.Combine(_outputPath, $"{timestamp}_{storyId}");
             Directory.CreateDirectory(outputDir);
         }
 
@@ -106,9 +106,9 @@ public class FileSystemOutputRepository : IOutputRepository
         _logger.LogInformation("Saved review report: {ReportPath}", reportPath);
     }
 
-    public async Task<string?> GetReviewReportAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<string?> GetReviewReportAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        var outputDir = await GetOutputPathAsync(storyId, cancellationToken);
         
         if (outputDir == null)
             return null;
@@ -136,15 +136,15 @@ public class FileSystemOutputRepository : IOutputRepository
         return Task.FromResult<IEnumerable<string>>(outputs);
     }
 
-    public async Task SavePipelineHistoryAsync(string requirementId, object pipelineStatus, CancellationToken cancellationToken = default)
+    public async Task SavePipelineHistoryAsync(string storyId, object pipelineStatus, CancellationToken cancellationToken = default)
     {
-        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        var outputDir = await GetOutputPathAsync(storyId, cancellationToken);
         
         if (outputDir == null)
         {
             // Create a new output directory if none exists
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            outputDir = Path.Combine(_outputPath, $"{timestamp}_{requirementId}");
+            outputDir = Path.Combine(_outputPath, $"{timestamp}_{storyId}");
             Directory.CreateDirectory(outputDir);
         }
 
@@ -160,9 +160,9 @@ public class FileSystemOutputRepository : IOutputRepository
         _logger.LogInformation("Saved pipeline history: {HistoryPath}", historyPath);
     }
 
-    public async Task<string?> GetPipelineHistoryAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<string?> GetPipelineHistoryAsync(string storyId, CancellationToken cancellationToken = default)
     {
-        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        var outputDir = await GetOutputPathAsync(storyId, cancellationToken);
         
         if (outputDir == null)
             return null;

@@ -55,7 +55,7 @@ var services = new ServiceCollection()
 // ════════════════════════════════════════════════════════════════════════════
 var console = services.GetRequiredService<IConsoleUI>();
 var paths = services.GetRequiredService<ResolvedPaths>();
-var requirementLoader = services.GetRequiredService<IRequirementLoader>();
+var storyLoader = services.GetRequiredService<IStoryLoader>();
 var pipelineRunner = services.GetRequiredService<IPipelineRunner>();
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -70,39 +70,39 @@ while (true)
 {
     console.Clear();
     console.ShowBanner();
-    console.ShowPaths(paths.CodingStandardsPath, paths.RequirementsPath, paths.OutputPath, paths.LogsPath);
+    console.ShowPaths(paths.CodingStandardsPath, paths.StoriesPath, paths.OutputPath, paths.LogsPath);
 
-    // Check for requirements
-    if (!requirementLoader.HasRequirements)
+    // Check for stories
+    if (!storyLoader.HasStories)
     {
-        console.ShowNoRequirementsFound(paths.RequirementsPath);
+        console.ShowNoStoriesFound(paths.StoriesPath);
         console.PressAnyKeyToContinue("Press any key to exit...");
         break;
     }
 
     // Refresh statuses and show menu
-    requirementLoader.RefreshStatuses();
-    var requirements = requirementLoader.GetAllRequirements();
-    console.ShowRequirementsMenu(requirements);
+    storyLoader.RefreshStatuses();
+    var stories = storyLoader.GetAllStories();
+    console.ShowStoriesMenu(stories);
 
     // Get user selection
-    var selectedRequirement = console.SelectRequirement(requirements);
+    var selectedStory = console.SelectStory(stories);
 
-    if (selectedRequirement == null)
+    if (selectedStory == null)
     {
         // User chose to exit
         break;
     }
 
-    // Process selected requirement
+    // Process selected story
     try
     {
-        await pipelineRunner.ProcessAsync(selectedRequirement);
+        await pipelineRunner.ProcessAsync(selectedStory);
     }
     catch (Exception ex)
     {
         console.ShowError($"\n  Error: {ex.Message}");
-        Log.Error(ex, "Error processing requirement {Name}", selectedRequirement.Name);
+        Log.Error(ex, "Error processing story {Name}", selectedStory.Name);
     }
 
     console.PressAnyKeyToContinue("Press any key to return to menu...");

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, FileText, Save, Database } from 'lucide-react';
-import { RequirementType, CreateRequirementRequest, CodebaseDto, CodebaseStatus } from '../types';
-import { requirementsApi, codebasesApi } from '../services/api';
+import { StoryType, CreateStoryRequest, CodebaseDto, CodebaseStatus } from '../types';
+import { storiesApi, codebasesApi } from '../services/api';
 
-export function NewRequirement() {
+export function NewStory() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
@@ -24,12 +24,12 @@ export function NewRequirement() {
     e.preventDefault();
 
     if (!name.trim()) {
-      setError('Please enter a requirement name');
+      setError('Please enter a story name');
       return;
     }
 
     if (!content.trim()) {
-      setError('Please enter requirement content');
+      setError('Please enter story content');
       return;
     }
 
@@ -37,31 +37,31 @@ export function NewRequirement() {
       setLoading(true);
       setError(null);
 
-      const request: CreateRequirementRequest = {
+      const request: CreateStoryRequest = {
         name: name.trim(),
         content: content.trim(),
-        type: RequirementType.Single, // Always use Single type
+        type: StoryType.Single, // Always use Single type
         codebaseId: codebaseId || undefined
       };
 
-      const created = await requirementsApi.create(request);
-      navigate(`/requirements/${created.id}`);
+      const created = await storiesApi.create(request);
+      navigate(`/storys/${created.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create requirement');
+      setError(err instanceof Error ? err.message : 'Failed to create story');
     } finally {
       setLoading(false);
     }
   };
 
-  const requirementTemplate = `# Feature Name
+  const storyTemplate = `# Feature Name
 
 ## Description
 Brief description of the feature or functionality needed.
 
-## Requirements
-- Requirement 1
-- Requirement 2
-- Requirement 3
+## Storys
+- Story 1
+- Story 2
+- Story 3
 
 ## Technical Details
 - Target framework: .NET 8.0
@@ -81,7 +81,7 @@ var result = service.DoSomething();
 `;
 
   const applyTemplate = () => {
-    setContent(requirementTemplate);
+    setContent(storyTemplate);
   };
 
   return (
@@ -95,8 +95,8 @@ var result = service.DoSomething();
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-white">New Requirement</h1>
-          <p className="text-slate-400">Create a new requirement for the AI pipeline</p>
+          <h1 className="text-2xl font-bold text-white">New Story</h1>
+          <p className="text-slate-400">Create a new story for the AI pipeline</p>
         </div>
       </div>
 
@@ -111,7 +111,7 @@ var result = service.DoSomething();
         {/* Name */}
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-2">
-            Requirement Name
+            Story Name
           </label>
           <input
             type="text"
@@ -166,7 +166,7 @@ var result = service.DoSomething();
           <div className="flex items-center justify-between mb-2">
             <label className="flex items-center gap-2 text-sm font-medium text-slate-300">
               <FileText className="w-4 h-4" />
-              Requirement Content
+              Story Content
             </label>
             <button
               type="button"
@@ -180,7 +180,7 @@ var result = service.DoSomething();
             value={content}
             onChange={e => setContent(e.target.value)}
             rows={20}
-            placeholder="Enter your requirement in Markdown format...
+            placeholder="Enter your story in Markdown format...
 
 Describe:
 - What you want to build
@@ -199,7 +199,7 @@ Describe:
             className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
           >
             <Save className="w-5 h-5" />
-            {loading ? 'Creating...' : 'Create Requirement'}
+            {loading ? 'Creating...' : 'Create Story'}
           </button>
           <Link
             to="/"

@@ -38,12 +38,12 @@ public class ConsoleUI : IConsoleUI
         Console.ResetColor();
     }
 
-    public void ShowPaths(string codingStandardsPath, string requirementsPath, string outputPath, string logsPath)
+    public void ShowPaths(string codingStandardsPath, string storiesPath, string outputPath, string logsPath)
     {
         Console.ForegroundColor = ConsoleColor.DarkGray;
         if (File.Exists(codingStandardsPath))
             Console.WriteLine($"  Coding Standards: {codingStandardsPath}");
-        Console.WriteLine($"  Requirements: {requirementsPath}");
+        Console.WriteLine($"  Storys: {storiesPath}");
         Console.WriteLine($"  Output: {outputPath}");
         Console.WriteLine($"  Logs: {logsPath}");
         Console.ResetColor();
@@ -52,9 +52,9 @@ public class ConsoleUI : IConsoleUI
 
     public void Clear() => Console.Clear();
 
-    #region Requirements Menu
+    #region Stories Menu
 
-    public void ShowRequirementsMenu(IReadOnlyList<RequirementInfo> requirements)
+    public void ShowStoriesMenu(IReadOnlyList<StoryInfo> stories)
     {
         Console.WriteLine();
         Console.WriteLine(Separator);
@@ -64,9 +64,9 @@ public class ConsoleUI : IConsoleUI
         Console.WriteLine(Separator);
         Console.WriteLine();
 
-        for (int i = 0; i < requirements.Count; i++)
+        for (int i = 0; i < stories.Count; i++)
         {
-            var req = requirements[i];
+            var req = stories[i];
 
             Console.ForegroundColor = req.Status.ToColor();
             Console.Write($"  [{i + 1}] ");
@@ -84,12 +84,12 @@ public class ConsoleUI : IConsoleUI
         Console.WriteLine();
         Console.WriteLine(ThinSeparator);
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("  [0] Exit  |  [R] Refresh  |  [number] Select requirement");
+        Console.WriteLine("  [0] Exit  |  [R] Refresh  |  [number] Select story");
         Console.ResetColor();
         Console.WriteLine();
     }
 
-    public RequirementInfo? SelectRequirement(IReadOnlyList<RequirementInfo> requirements)
+    public StoryInfo? SelectStory(IReadOnlyList<StoryInfo> stories)
     {
         while (true)
         {
@@ -101,15 +101,15 @@ public class ConsoleUI : IConsoleUI
 
             if (input == "r" || input == "refresh")
             {
-                foreach (var req in requirements)
+                foreach (var req in stories)
                     req.RefreshStatus();
-                ShowRequirementsMenu(requirements);
+                ShowStoriesMenu(stories);
                 continue;
             }
 
-            if (int.TryParse(input, out var index) && index >= 1 && index <= requirements.Count)
+            if (int.TryParse(input, out var index) && index >= 1 && index <= stories.Count)
             {
-                return requirements[index - 1];
+                return stories[index - 1];
             }
 
             ShowWarning("  Invalid selection. Please try again.");
@@ -426,12 +426,12 @@ public class ConsoleUI : IConsoleUI
         Console.ResetColor();
     }
 
-    public void ShowNoRequirementsFound(string requirementsPath)
+    public void ShowNoStoriesFound(string storiesPath)
     {
         Console.WriteLine();
-        ShowWarning("  ⚠️ No requirement files found!");
+        ShowWarning("  ⚠️ No story files found!");
         Console.WriteLine();
-        Console.WriteLine($"  Add files to: {requirementsPath}");
+        Console.WriteLine($"  Add files to: {storiesPath}");
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine("    Supported formats: *.txt, *.md, *.json");
         Console.ResetColor();
