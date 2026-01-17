@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
-import { Check, Clock, Loader2, AlertCircle, SkipForward, Circle, Search, ListTodo, Code, Bug, FileCheck, Rocket, TestTube, GitPullRequest, RefreshCw, AlertTriangle, Wrench, ChevronDown, ChevronRight, Eye } from 'lucide-react';
+import { Check, Clock, Loader2, AlertCircle, SkipForward, TestTube, GitPullRequest, RefreshCw, AlertTriangle, Wrench, Code } from 'lucide-react';
 import { 
   PipelineStatusDto, 
   PhaseState, 
   PipelinePhase,
-  PhaseStatusDto,
   RetryAction,
   FixTaskDto,
   TestSummaryDto,
@@ -13,6 +11,7 @@ import {
   getRetryReasonLabel,
   getFixTaskTypeLabel
 } from '../types';
+import { PipelineHistorySummary, getPhaseTypeIcon } from './PipelineHistorySummary';
 
 interface PipelineStatusProps {
   status: PipelineStatusDto;
@@ -26,8 +25,8 @@ function PhaseResultPreview({ result }: { result: unknown }) {
   try {
     const jsonStr = JSON.stringify(result, null, 2);
     return (
-      <div className="p-3 bg-slate-900/50 rounded-lg">
-        <pre className="text-xs text-slate-400 overflow-auto max-h-60">
+      <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+        <pre className="text-xs text-slate-400 overflow-auto max-h-60 whitespace-pre-wrap">
           {jsonStr}
         </pre>
       </div>
@@ -38,43 +37,7 @@ function PhaseResultPreview({ result }: { result: unknown }) {
 }
 
 export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: PipelineStatusProps) {
-  const [expandedPhases, setExpandedPhases] = useState<Set<PipelinePhase>>(new Set());
-
-  const togglePhaseDetails = (phase: PipelinePhase) => {
-    setExpandedPhases(prev => {
-      const next = new Set(prev);
-      if (next.has(phase)) {
-        next.delete(phase);
-      } else {
-        next.add(phase);
-      }
-      return next;
-    });
-  };
-
-  // Get icon based on phase type (for running state)
-  const getPhaseTypeIcon = (phase: PipelinePhase) => {
-    switch (phase) {
-      case PipelinePhase.Analysis:
-        return <Search className="w-5 h-5" />;
-      case PipelinePhase.Planning:
-        return <ListTodo className="w-5 h-5" />;
-      case PipelinePhase.Coding:
-        return <Code className="w-5 h-5" />;
-      case PipelinePhase.Debugging:
-        return <Bug className="w-5 h-5" />;
-      case PipelinePhase.Reviewing:
-        return <FileCheck className="w-5 h-5" />;
-      case PipelinePhase.Deployment:
-        return <Rocket className="w-5 h-5" />;
-      case PipelinePhase.UnitTesting:
-        return <TestTube className="w-5 h-5" />;
-      case PipelinePhase.PullRequest:
-        return <GitPullRequest className="w-5 h-5" />;
-      default:
-        return <Circle className="w-5 h-5" />;
-    }
-  };
+  // getPhaseTypeIcon is imported from PipelineHistorySummary (shared component)
 
   const getPhaseIcon = (state: PhaseState, phase: PipelinePhase) => {
     switch (state) {
@@ -108,42 +71,28 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
     return labels[state];
   };
 
-  // Calculate progress - include completed pipeline as 100%
+  // Calculate progress
   const isCompleted = status.currentPhase === PipelinePhase.Completed;
   const completedCount = status.phases.filter(p => 
     p.state === PhaseState.Completed || p.state === PhaseState.Skipped
   ).length;
-  const progressPercent = isCompleted ? 100 : (completedCount / status.phases.length) * 100;
+  // For progress line: calculate based on completed phases, ensure 100% when all done
+  const progressPercent = isCompleted ? 100 : Math.min(((completedCount) / (status.phases.length - 1)) * 100, 100);
 
   return (
     <div className="space-y-4">
-      {/* Progress Bar with Percentage */}
-      <div className="mb-2">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-sm text-slate-400">Pipeline Progress</span>
-          <span className={`text-sm font-bold ${isCompleted ? 'text-emerald-400' : 'text-blue-400'}`}>
-            {Math.round(progressPercent)}%
-          </span>
-        </div>
-        <div className="relative h-2 bg-slate-700 rounded-full overflow-hidden">
-          <div 
-            className={`absolute top-0 left-0 h-full transition-all duration-500 rounded-full ${
-              isCompleted ? 'bg-emerald-500' : 'bg-blue-500'
-            }`}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Phase Steps */}
-      <div className="relative">
-        <div className="absolute top-5 left-5 right-5 h-0.5 bg-slate-700" />
+      {/* Phase Steps with Progress Line */}
+      <div className="relative py-2">
+        {/* Background line */}
+        <div className="absolute top-7 left-5 right-5 h-0.5 bg-slate-700" />
+        {/* Progress line */}
         <div 
-          className={`absolute top-5 left-5 h-0.5 transition-all duration-500 ${
+          className={`absolute top-7 left-5 h-0.5 transition-all duration-500 ${
             isCompleted ? 'bg-emerald-500' : 'bg-blue-500'
           }`}
-          style={{ width: `${progressPercent}%` }}
+          style={{ width: `calc(${progressPercent}% - 20px)` }}
         />
+        
         <div className="relative flex justify-between">
           {status.phases.map((phase, index) => (
             <div key={phase.phase} className="flex flex-col items-center" style={{ animationDelay: `${index * 100}ms` }}>
@@ -181,8 +130,15 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
         </div>
       </div>
 
+      {/* Completed - Phase Summary with Details (using shared component) */}
+      {isCompleted && (
+        <div className="mt-6">
+          <PipelineHistorySummary status={status} showSuccessBanner={true} />
+        </div>
+      )}
+
       {/* Current Phase Details - Waiting Approval */}
-      {status.phases
+      {!isCompleted && status.phases
         .filter(phase => phase.state === PhaseState.WaitingApproval)
         .map(phase => (
           <div 
@@ -278,7 +234,7 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
         ))}
 
       {/* Running Phase */}
-      {status.phases.some(p => p.state === PhaseState.Running) && (
+      {!isCompleted && status.phases.some(p => p.state === PhaseState.Running) && (
         <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
           <div className="flex items-center gap-3">
             <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
@@ -294,170 +250,12 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
         </div>
       )}
 
-      {/* Completed - Full Summary Panel */}
-      {isCompleted && (
-        <CompletedSummaryPanel 
-          phases={status.phases}
-          expandedPhases={expandedPhases}
-          onToggle={togglePhaseDetails}
-          getPhaseTypeIcon={getPhaseTypeIcon}
-        />
-      )}
-
       {/* Retry Panel */}
       {status.retryInfo && onApproveRetry && (
         <RetryPanel 
           retryInfo={status.retryInfo}
           onApproveRetry={onApproveRetry}
         />
-      )}
-    </div>
-  );
-}
-
-// Completed Summary Panel Component
-interface CompletedSummaryPanelProps {
-  phases: PhaseStatusDto[];
-  expandedPhases: Set<PipelinePhase>;
-  onToggle: (phase: PipelinePhase) => void;
-  getPhaseTypeIcon: (phase: PipelinePhase) => React.ReactNode;
-}
-
-function CompletedSummaryPanel({ phases, expandedPhases, onToggle, getPhaseTypeIcon }: CompletedSummaryPanelProps) {
-  return (
-    <div className="mt-6 space-y-4">
-      {/* Success Banner */}
-      <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center">
-            <Check className="w-8 h-8 text-emerald-400" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-emerald-400">
-              Pipeline Completed Successfully! 🎉
-            </h3>
-            <p className="text-sm text-slate-400">
-              All {phases.length} phases have been processed
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Phase Summary List */}
-      <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-        <div className="p-3 bg-slate-800 border-b border-slate-700">
-          <h4 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-            <ListTodo className="w-4 h-4" />
-            Phase Summary
-          </h4>
-        </div>
-        <div className="divide-y divide-slate-700">
-          {phases.map((phase, index) => (
-            <PhaseDetailRow
-              key={phase.phase}
-              phase={phase}
-              index={index}
-              isExpanded={expandedPhases.has(phase.phase)}
-              onToggle={() => onToggle(phase.phase)}
-              getPhaseTypeIcon={getPhaseTypeIcon}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Phase Detail Row Component
-interface PhaseDetailRowProps {
-  phase: PhaseStatusDto;
-  index: number;
-  isExpanded: boolean;
-  onToggle: () => void;
-  getPhaseTypeIcon: (phase: PipelinePhase) => React.ReactNode;
-}
-
-function PhaseDetailRow({ phase, index, isExpanded, onToggle, getPhaseTypeIcon }: PhaseDetailRowProps) {
-  const hasResult = phase.result != null;
-  
-  const getStateColor = (state: PhaseState) => {
-    switch (state) {
-      case PhaseState.Completed: return 'text-emerald-400 bg-emerald-500/10';
-      case PhaseState.Skipped: return 'text-slate-400 bg-slate-600/30';
-      case PhaseState.Failed: return 'text-red-400 bg-red-500/10';
-      default: return 'text-slate-400 bg-slate-600/30';
-    }
-  };
-
-  const getStateBadge = (state: PhaseState) => {
-    switch (state) {
-      case PhaseState.Completed: return '✓ Completed';
-      case PhaseState.Skipped: return '⏭ Skipped';
-      case PhaseState.Failed: return '✗ Failed';
-      default: return state;
-    }
-  };
-
-  return (
-    <div className="transition-colors hover:bg-slate-800/30">
-      <div 
-        className={`p-3 flex items-center gap-3 ${hasResult ? 'cursor-pointer' : ''}`}
-        onClick={hasResult ? onToggle : undefined}
-      >
-        {/* Phase Number */}
-        <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-400">
-          {index + 1}
-        </div>
-
-        {/* Phase Icon */}
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${getStateColor(phase.state)}`}>
-          {getPhaseTypeIcon(phase.phase)}
-        </div>
-
-        {/* Phase Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-slate-200">{getPhaseLabel(phase.phase)}</span>
-            <span className={`text-xs px-2 py-0.5 rounded ${getStateColor(phase.state)}`}>
-              {getStateBadge(phase.state)}
-            </span>
-          </div>
-          <div className="text-xs text-slate-500">
-            {getPhaseAgent(phase.phase) || 'System'}
-            {phase.message && <span className="ml-2 text-slate-400">• {phase.message}</span>}
-          </div>
-        </div>
-
-        {/* Time Info */}
-        {phase.completedAt && (
-          <div className="text-xs text-slate-500">
-            {new Date(phase.completedAt).toLocaleTimeString()}
-          </div>
-        )}
-
-        {/* Expand Button */}
-        {hasResult && (
-          <button className="p-1 hover:bg-slate-700 rounded transition-colors">
-            {isExpanded ? (
-              <ChevronDown className="w-5 h-5 text-slate-400" />
-            ) : (
-              <ChevronRight className="w-5 h-5 text-slate-400" />
-            )}
-          </button>
-        )}
-
-        {/* View Button (alternative) */}
-        {hasResult && !isExpanded && (
-          <Eye className="w-4 h-4 text-slate-500" />
-        )}
-      </div>
-
-      {/* Expanded Details */}
-      {isExpanded && hasResult && (
-        <div className="px-3 pb-3 pl-[60px]">
-          <div className="text-xs text-slate-500 mb-2">Phase Result Data:</div>
-          <PhaseResultPreview result={phase.result} />
-        </div>
       )}
     </div>
   );

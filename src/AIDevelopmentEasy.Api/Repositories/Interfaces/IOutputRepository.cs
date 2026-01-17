@@ -34,4 +34,14 @@ public interface IOutputRepository
     /// List all output directories
     /// </summary>
     Task<IEnumerable<string>> ListOutputsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Save pipeline execution history (summary of all phases)
+    /// </summary>
+    Task SavePipelineHistoryAsync(string requirementId, object pipelineStatus, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get pipeline execution history
+    /// </summary>
+    Task<string?> GetPipelineHistoryAsync(string requirementId, CancellationToken cancellationToken = default);
 }

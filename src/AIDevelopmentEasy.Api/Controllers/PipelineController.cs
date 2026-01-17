@@ -177,6 +177,43 @@ public class PipelineController : ControllerBase
         var retryInfo = await _pipelineService.GetRetryInfoAsync(requirementId, cancellationToken);
         return Ok(retryInfo);
     }
+
+    /// <summary>
+    /// Get pipeline execution history (all phase details from completed pipeline)
+    /// </summary>
+    [HttpGet("{requirementId}/history")]
+    public async Task<ActionResult<PipelineStatusDto?>> GetHistory(string requirementId, CancellationToken cancellationToken)
+    {
+        // First try to get from running/memory
+        var status = await _pipelineService.GetStatusAsync(requirementId, cancellationToken);
+        
+        if (status != null && status.CurrentPhase == PipelinePhase.Completed)
+        {
+            return Ok(status);
+        }
+
+        // Try to get from disk directly
+        var historyJson = await _outputRepository.GetPipelineHistoryAsync(requirementId, cancellationToken);
+        
+        if (string.IsNullOrEmpty(historyJson))
+        {
+            return NotFound(new { Message = "No pipeline history found for this requirement" });
+        }
+
+        try
+        {
+            var historyStatus = System.Text.Json.JsonSerializer.Deserialize<PipelineStatusDto>(historyJson, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            return Ok(historyStatus);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to deserialize pipeline history for {RequirementId}", requirementId);
+            return BadRequest(new { Message = "Failed to parse pipeline history" });
+        }
+    }
 }
 
 public class RejectPhaseRequest

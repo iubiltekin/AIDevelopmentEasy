@@ -139,6 +139,15 @@ export const pipelineApi = {
   getRetryInfo: async (requirementId: string): Promise<RetryInfoDto | null> => {
     const response = await fetch(`${API_BASE}/pipeline/${requirementId}/retry`);
     return handleResponse<RetryInfoDto | null>(response);
+  },
+
+  // History endpoint - get completed pipeline details
+  getHistory: async (requirementId: string): Promise<PipelineStatusDto | null> => {
+    const response = await fetch(`${API_BASE}/pipeline/${requirementId}/history`);
+    if (response.status === 404) {
+      return null;
+    }
+    return handleResponse<PipelineStatusDto>(response);
   }
 };
 

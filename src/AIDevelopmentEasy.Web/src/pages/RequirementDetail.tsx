@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw } from 'lucide-react';
-import { RequirementDto, RequirementStatus, TaskStatus } from '../types';
+import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X } from 'lucide-react';
+import { RequirementDto, RequirementStatus, TaskStatus, PipelineStatusDto } from '../types';
 import { requirementsApi, pipelineApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
+import { PipelineHistorySummary } from '../components/PipelineHistorySummary';
 
 export function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
@@ -14,18 +15,21 @@ export function RequirementDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'content' | 'tasks' | 'output'>('overview');
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyData, setHistoryData] = useState<PipelineStatusDto | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       if (!id) return;
-      
+
       try {
         setLoading(true);
         const [req, reqContent] = await Promise.all([
           requirementsApi.getById(id),
           requirementsApi.getContent(id).catch(() => '')
         ]);
-        
+
         setRequirement(req);
         setContent(reqContent);
 
@@ -33,7 +37,7 @@ export function RequirementDetail() {
           const out = await pipelineApi.getOutput(id).catch(() => ({}));
           setOutput(out);
         }
-        
+
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load requirement');
@@ -58,7 +62,7 @@ export function RequirementDetail() {
   const handleReset = async () => {
     if (!id) return;
     if (!confirm('Reset this requirement? All tasks and output will be cleared.')) return;
-    
+
     try {
       await requirementsApi.reset(id);
       window.location.reload();
@@ -70,12 +74,28 @@ export function RequirementDetail() {
   const handleDelete = async () => {
     if (!id) return;
     if (!confirm('Delete this requirement? This cannot be undone.')) return;
-    
+
     try {
       await requirementsApi.delete(id);
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete requirement');
+    }
+  };
+
+  const handleShowHistory = async () => {
+    if (!id) return;
+
+    setHistoryLoading(true);
+    setShowHistory(true);
+
+    try {
+      const history = await pipelineApi.getHistory(id);
+      setHistoryData(history);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load pipeline history');
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -132,16 +152,16 @@ export function RequirementDetail() {
           </div>
         </div>
         <div className="flex gap-3">
-          {requirement.status !== RequirementStatus.InProgress && 
-           requirement.status !== RequirementStatus.Completed && (
-            <button
-              onClick={handleStart}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-            >
-              <Play className="w-4 h-4" />
-              Start Pipeline
-            </button>
-          )}
+          {requirement.status !== RequirementStatus.InProgress &&
+            requirement.status !== RequirementStatus.Completed && (
+              <button
+                onClick={handleStart}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              >
+                <Play className="w-4 h-4" />
+                Start Pipeline
+              </button>
+            )}
           {requirement.status === RequirementStatus.InProgress && (
             <Link
               to={`/pipeline/${id}`}
@@ -150,6 +170,15 @@ export function RequirementDetail() {
               <Eye className="w-4 h-4" />
               View Progress
             </Link>
+          )}
+          {requirement.status === RequirementStatus.Completed && (
+            <button
+              onClick={handleShowHistory}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+            >
+              <History className="w-4 h-4" />
+              Pipeline History
+            </button>
           )}
           <button
             onClick={handleReset}
@@ -181,11 +210,10 @@ export function RequirementDetail() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab as typeof activeTab)}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === tab
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800 text-slate-400 hover:text-white'
-            }`}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === tab
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
           >
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
@@ -263,69 +291,67 @@ export function RequirementDetail() {
             <h3 className="text-lg font-semibold text-white mb-4">
               Tasks ({requirement.tasks.length})
             </h3>
-                {requirement.tasks.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400">
-                    No tasks yet. Start the pipeline to generate tasks.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {requirement.tasks.map((task, index) => (
-                      <div 
-                        key={index}
-                        className={`p-4 bg-slate-900 rounded-lg border ${
-                          task.isModification 
-                            ? 'border-amber-500/50' 
-                            : 'border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl">{getTaskStatusIcon(task.status)}</span>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-white">{task.title}</span>
-                                {task.isModification && (
-                                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
-                                    Modify
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-sm text-slate-400">
-                                {task.projectName && `Project: ${task.projectName}`}
-                              </div>
-                            </div>
-                          </div>
-                          <span className="text-xs text-slate-500">#{task.index + 1}</span>
-                        </div>
-                        {task.description && (
-                          <p className="mt-2 text-sm text-slate-400">{task.description}</p>
-                        )}
-                        {task.targetFiles.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {task.targetFiles.map((file, i) => (
-                              <span 
-                                key={i}
-                                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${
-                                  task.isModification
-                                    ? 'bg-amber-500/10 text-amber-300'
-                                    : 'bg-slate-800 text-slate-300'
-                                }`}
-                              >
-                                <FileCode className="w-3 h-3" />
-                                {file}
+            {requirement.tasks.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">
+                No tasks yet. Start the pipeline to generate tasks.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {requirement.tasks.map((task, index) => (
+                  <div
+                    key={index}
+                    className={`p-4 bg-slate-900 rounded-lg border ${task.isModification
+                      ? 'border-amber-500/50'
+                      : 'border-slate-700'
+                      }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{getTaskStatusIcon(task.status)}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-white">{task.title}</span>
+                            {task.isModification && (
+                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs rounded">
+                                Modify
                               </span>
-                            ))}
+                            )}
                           </div>
-                        )}
-                        {task.usesExisting && task.usesExisting.length > 0 && (
-                          <div className="mt-2 text-xs text-slate-500">
-                            Uses: {task.usesExisting.join(', ')}
+                          <div className="text-sm text-slate-400">
+                            {task.projectName && `Project: ${task.projectName}`}
                           </div>
-                        )}
+                        </div>
                       </div>
-                    ))}
+                      <span className="text-xs text-slate-500">#{task.index + 1}</span>
+                    </div>
+                    {task.description && (
+                      <p className="mt-2 text-sm text-slate-400">{task.description}</p>
+                    )}
+                    {task.targetFiles.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {task.targetFiles.map((file, i) => (
+                          <span
+                            key={i}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${task.isModification
+                              ? 'bg-amber-500/10 text-amber-300'
+                              : 'bg-slate-800 text-slate-300'
+                              }`}
+                          >
+                            <FileCode className="w-3 h-3" />
+                            {file}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {task.usesExisting && task.usesExisting.length > 0 && (
+                      <div className="mt-2 text-xs text-slate-500">
+                        Uses: {task.usesExisting.join(', ')}
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -353,6 +379,59 @@ export function RequirementDetail() {
           </div>
         )}
       </div>
+
+      {/* History Modal */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                  <History className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Pipeline History</h2>
+                  <p className="text-sm text-slate-400">Complete execution summary for {requirement.name}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content - Using shared PipelineHistorySummary component */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+                </div>
+              ) : historyData ? (
+                <PipelineHistorySummary status={historyData} showSuccessBanner={true} compact={true} />
+              ) : (
+                <div className="text-center py-12 text-slate-400">
+                  <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No pipeline history found for this requirement.</p>
+                  <p className="text-sm mt-2">History is saved when a pipeline completes successfully.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-700 flex justify-end">
+              <button
+                onClick={() => setShowHistory(false)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

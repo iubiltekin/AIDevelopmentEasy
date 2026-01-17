@@ -58,6 +58,49 @@ public abstract class BaseAgent : IAgent
     /// </summary>
     protected virtual string GetFallbackPrompt() => $"You are a {Role}.";
 
+    // Static settings that can be updated at runtime
+    private static int _maxPromptTokens = 8000;
+    private static int _maxCompletionTokens = 4000;
+    private static bool _showPromptInfo = true;
+    private static decimal _costPer1KInput = 0.01m;
+    private static decimal _costPer1KOutput = 0.03m;
+
+    /// <summary>
+    /// Callback to record LLM call statistics (set by API layer)
+    /// </summary>
+    public static Action<LLMCallInfo>? OnLLMCallCompleted { get; set; }
+
+    /// <summary>
+    /// Update LLM settings at runtime (called from API when settings change)
+    /// </summary>
+    public static void UpdateLLMSettings(int maxPromptTokens, int maxCompletionTokens, bool showPromptInfo, decimal costPer1KInput, decimal costPer1KOutput)
+    {
+        _maxPromptTokens = maxPromptTokens;
+        _maxCompletionTokens = maxCompletionTokens;
+        _showPromptInfo = showPromptInfo;
+        _costPer1KInput = costPer1KInput;
+        _costPer1KOutput = costPer1KOutput;
+    }
+
+    /// <summary>
+    /// Estimate token count from text (1 token ≈ 3.5 characters)
+    /// </summary>
+    protected static int EstimateTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        return (int)Math.Ceiling(text.Length / 3.5);
+    }
+
+    /// <summary>
+    /// Calculate estimated cost
+    /// </summary>
+    protected static decimal CalculateCost(int inputTokens, int outputTokens)
+    {
+        var inputCost = (inputTokens / 1000m) * _costPer1KInput;
+        var outputCost = (outputTokens / 1000m) * _costPer1KOutput;
+        return Math.Round(inputCost + outputCost, 6);
+    }
+
     /// <summary>
     /// Call the LLM with given messages
     /// </summary>
@@ -68,7 +111,27 @@ public abstract class BaseAgent : IAgent
         int maxTokens = 4000,
         CancellationToken cancellationToken = default)
     {
-        _logger?.LogDebug("[{Agent}] Calling LLM with prompt length: {Length}", Name, userPrompt.Length);
+        var startTime = DateTime.UtcNow;
+        
+        // Estimate input tokens
+        var estimatedInputTokens = EstimateTokens(systemPrompt) + EstimateTokens(userPrompt);
+        var effectiveMaxTokens = Math.Min(maxTokens, _maxCompletionTokens);
+        var estimatedCost = CalculateCost(estimatedInputTokens, effectiveMaxTokens / 2); // Assume ~50% completion
+
+        // Log prompt info if enabled
+        if (_showPromptInfo)
+        {
+            var estimatedKB = (int)Math.Ceiling(estimatedInputTokens * 4.0 / 1024);
+            _logger?.LogInformation("[{Agent}] 🤖 LLM Call Starting | Est. Input: ~{Tokens:N0} tokens (~{KB} KB) | Max Output: {MaxTokens:N0} | Est. Cost: ${Cost:F4}",
+                Name, estimatedInputTokens, estimatedKB, effectiveMaxTokens, estimatedCost);
+        }
+
+        // Check if prompt exceeds limit
+        if (estimatedInputTokens > _maxPromptTokens)
+        {
+            _logger?.LogWarning("[{Agent}] ⚠️ Prompt size ({Tokens:N0} tokens) exceeds limit ({Limit:N0}). Proceeding anyway but may be truncated.",
+                Name, estimatedInputTokens, _maxPromptTokens);
+        }
 
         var options = new ChatCompletionsOptions
         {
@@ -79,16 +142,39 @@ public abstract class BaseAgent : IAgent
                 new ChatRequestUserMessage(userPrompt)
             },
             Temperature = temperature,
-            MaxTokens = maxTokens
+            MaxTokens = effectiveMaxTokens
         };
 
         var response = await _openAIClient.GetChatCompletionsAsync(options, cancellationToken);
         var content = response.Value.Choices[0].Message.Content;
-        var tokens = response.Value.Usage.TotalTokens;
+        var promptTokens = response.Value.Usage.PromptTokens;
+        var completionTokens = response.Value.Usage.CompletionTokens;
+        var totalTokens = response.Value.Usage.TotalTokens;
+        var duration = DateTime.UtcNow - startTime;
 
-        _logger?.LogDebug("[{Agent}] LLM response received. Tokens: {Tokens}", Name, tokens);
+        // Calculate actual cost
+        var actualCost = CalculateCost(promptTokens, completionTokens);
 
-        return (content, tokens);
+        // Log completion info
+        if (_showPromptInfo)
+        {
+            _logger?.LogInformation("[{Agent}] ✅ LLM Complete | Total: {Total:N0} tokens (in:{In:N0}, out:{Out:N0}) | Cost: ${Cost:F4} | Duration: {Duration:F1}s",
+                Name, totalTokens, promptTokens, completionTokens, actualCost, duration.TotalSeconds);
+        }
+
+        // Record stats via callback (if registered)
+        OnLLMCallCompleted?.Invoke(new LLMCallInfo
+        {
+            AgentName = Name,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            TotalTokens = totalTokens,
+            ActualCostUSD = actualCost,
+            Duration = duration,
+            Timestamp = DateTime.UtcNow
+        });
+
+        return (content, totalTokens);
     }
 
     /// <summary>
@@ -101,11 +187,14 @@ public abstract class BaseAgent : IAgent
         int maxTokens = 4000,
         CancellationToken cancellationToken = default)
     {
+        var startTime = DateTime.UtcNow;
+        var effectiveMaxTokens = Math.Min(maxTokens, _maxCompletionTokens);
+        
         var options = new ChatCompletionsOptions
         {
             DeploymentName = _deploymentName,
             Temperature = temperature,
-            MaxTokens = maxTokens
+            MaxTokens = effectiveMaxTokens
         };
 
         options.Messages.Add(new ChatRequestSystemMessage(systemPrompt));
@@ -120,9 +209,32 @@ public abstract class BaseAgent : IAgent
 
         var response = await _openAIClient.GetChatCompletionsAsync(options, cancellationToken);
         var responseContent = response.Value.Choices[0].Message.Content;
-        var tokens = response.Value.Usage.TotalTokens;
+        var promptTokens = response.Value.Usage.PromptTokens;
+        var completionTokens = response.Value.Usage.CompletionTokens;
+        var totalTokens = response.Value.Usage.TotalTokens;
+        var duration = DateTime.UtcNow - startTime;
+        var actualCost = CalculateCost(promptTokens, completionTokens);
 
-        return (responseContent, tokens);
+        // Log completion info
+        if (_showPromptInfo)
+        {
+            _logger?.LogInformation("[{Agent}] ✅ LLM Complete (history) | Total: {Total:N0} tokens (in:{In:N0}, out:{Out:N0}) | Cost: ${Cost:F4} | Duration: {Duration:F1}s",
+                Name, totalTokens, promptTokens, completionTokens, actualCost, duration.TotalSeconds);
+        }
+
+        // Record stats via callback (if registered)
+        OnLLMCallCompleted?.Invoke(new LLMCallInfo
+        {
+            AgentName = Name,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            TotalTokens = totalTokens,
+            ActualCostUSD = actualCost,
+            Duration = duration,
+            Timestamp = DateTime.UtcNow
+        });
+
+        return (responseContent, totalTokens);
     }
 
     /// <summary>
@@ -220,4 +332,18 @@ IMPORTANT: You MUST follow all coding standards above. Pay special attention to:
 - Naming conventions
 - Prohibited patterns and required patterns";
     }
+}
+
+/// <summary>
+/// Information about an LLM call for tracking purposes
+/// </summary>
+public class LLMCallInfo
+{
+    public string AgentName { get; set; } = "";
+    public int PromptTokens { get; set; }
+    public int CompletionTokens { get; set; }
+    public int TotalTokens { get; set; }
+    public decimal ActualCostUSD { get; set; }
+    public TimeSpan Duration { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

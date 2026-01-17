@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AIDevelopmentEasy.Api.Repositories.Interfaces;
 
 namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
@@ -133,5 +134,44 @@ public class FileSystemOutputRepository : IOutputRepository
             .ToList();
 
         return Task.FromResult<IEnumerable<string>>(outputs);
+    }
+
+    public async Task SavePipelineHistoryAsync(string requirementId, object pipelineStatus, CancellationToken cancellationToken = default)
+    {
+        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        
+        if (outputDir == null)
+        {
+            // Create a new output directory if none exists
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            outputDir = Path.Combine(_outputPath, $"{timestamp}_{requirementId}");
+            Directory.CreateDirectory(outputDir);
+        }
+
+        var historyPath = Path.Combine(outputDir, "pipeline_history.json");
+        var jsonOptions = new JsonSerializerOptions 
+        { 
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        var json = JsonSerializer.Serialize(pipelineStatus, jsonOptions);
+        await File.WriteAllTextAsync(historyPath, json, cancellationToken);
+
+        _logger.LogInformation("Saved pipeline history: {HistoryPath}", historyPath);
+    }
+
+    public async Task<string?> GetPipelineHistoryAsync(string requirementId, CancellationToken cancellationToken = default)
+    {
+        var outputDir = await GetOutputPathAsync(requirementId, cancellationToken);
+        
+        if (outputDir == null)
+            return null;
+
+        var historyPath = Path.Combine(outputDir, "pipeline_history.json");
+        
+        if (!File.Exists(historyPath))
+            return null;
+
+        return await File.ReadAllTextAsync(historyPath, cancellationToken);
     }
 }

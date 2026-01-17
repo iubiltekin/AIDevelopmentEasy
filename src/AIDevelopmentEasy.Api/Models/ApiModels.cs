@@ -251,6 +251,18 @@ public class FixTaskDto
     public string? ErrorLocation { get; set; }
     public string? StackTrace { get; set; }
     public string? SuggestedFix { get; set; }
+    /// <summary>
+    /// Project name where the fix should be applied (extracted from generated files)
+    /// </summary>
+    public string? ProjectName { get; set; }
+    /// <summary>
+    /// Namespace of the file to be fixed
+    /// </summary>
+    public string? Namespace { get; set; }
+    /// <summary>
+    /// Full path to the file in the codebase (for modification mode)
+    /// </summary>
+    public string? FullPath { get; set; }
 }
 
 /// <summary>

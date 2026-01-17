@@ -1,5 +1,6 @@
 using Azure;
 using Azure.AI.OpenAI;
+using AIDevelopmentEasy.Api.Controllers;
 using AIDevelopmentEasy.Api.Hubs;
 using AIDevelopmentEasy.Api.Repositories.FileSystem;
 using AIDevelopmentEasy.Api.Repositories.Interfaces;
@@ -96,6 +97,12 @@ var targetLanguage = builder.Configuration["AIDevelopmentEasy:TargetLanguage"] ?
 var debugMaxRetries = int.Parse(builder.Configuration["AIDevelopmentEasy:DebugMaxRetries"] ?? "3");
 
 var openAIClient = new OpenAIClient(new Uri(azureEndpoint), new AzureKeyCredential(azureApiKey));
+
+// ════════════════════════════════════════════════════════════════════════════
+// LLM Settings Configuration
+// ════════════════════════════════════════════════════════════════════════════
+builder.Services.Configure<AIDevelopmentEasy.Api.Models.LLMSettings>(
+    builder.Configuration.GetSection("AIDevelopmentEasy:LLM"));
 
 // ════════════════════════════════════════════════════════════════════════════
 // Services Registration
@@ -224,6 +231,10 @@ Log.Information("  Output: {Path}", outputPath);
 Log.Information("  API: /swagger");
 Log.Information("  Web UI: / (if wwwroot exists)");
 Log.Information("════════════════════════════════════════════════════════════");
+
+// Initialize LLM usage tracker (registers callback with BaseAgent)
+_ = LLMUsageTracker.Instance;
+Log.Information("  LLM Usage Tracker: Initialized");
 
 app.Run();
 

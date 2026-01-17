@@ -91,6 +91,10 @@ public interface IPipelineNotificationService
     Task NotifyFixTasksGeneratedAsync(string requirementId, List<FixTaskDto> fixTasks);
     Task NotifyTestResultsAsync(string requirementId, TestSummaryDto testSummary);
     Task NotifyRetryStartingAsync(string requirementId, int attempt, int maxAttempts, PipelinePhase targetPhase);
+    
+    // LLM call notifications
+    Task NotifyLLMCallStartingAsync(string requirementId, LLMCallInfo callInfo);
+    Task NotifyLLMCallCompletedAsync(string requirementId, LLMCallResult result);
 }
 
 /// <summary>
@@ -217,6 +221,40 @@ public class SignalRPipelineNotificationService : IPipelineNotificationService
         await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
         _logger.LogInformation("[{RequirementId}] Starting retry attempt {Attempt}/{Max} → {Phase}", 
             requirementId, attempt, maxAttempts, targetPhase);
+    }
+
+    public async Task NotifyLLMCallStartingAsync(string requirementId, LLMCallInfo callInfo)
+    {
+        var costStr = callInfo.EstimatedCostUSD > 0 
+            ? $", Est. Cost: ${callInfo.EstimatedCostUSD:F4}" 
+            : "";
+        
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "LLMCallStarting",
+            Phase = PipelinePhase.None,
+            Message = $"🤖 LLM Call: {callInfo.AgentName} | ~{callInfo.EstimatedInputTokens:N0} tokens (~{callInfo.EstimatedInputKB} KB){costStr}",
+            Data = callInfo
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] LLM Call Starting: {Agent} | ~{Tokens} tokens (~{KB} KB){Cost}", 
+            requirementId, callInfo.AgentName, callInfo.EstimatedInputTokens, callInfo.EstimatedInputKB, costStr);
+    }
+
+    public async Task NotifyLLMCallCompletedAsync(string requirementId, LLMCallResult result)
+    {
+        var update = new PipelineUpdateMessage
+        {
+            RequirementId = requirementId,
+            UpdateType = "LLMCallCompleted",
+            Phase = PipelinePhase.None,
+            Message = $"✅ LLM Complete: {result.AgentName} | {result.TotalTokens:N0} tokens (in:{result.PromptTokens:N0}, out:{result.CompletionTokens:N0}) | Cost: ${result.ActualCostUSD:F4} | {result.Duration.TotalSeconds:F1}s",
+            Data = result
+        };
+        await SendToRequirementGroupAsync(requirementId, "PipelineUpdate", update);
+        _logger.LogInformation("[{RequirementId}] LLM Complete: {Agent} | Total: {Total} tokens | Cost: ${Cost:F4} | Duration: {Duration}s", 
+            requirementId, result.AgentName, result.TotalTokens, result.ActualCostUSD, result.Duration.TotalSeconds);
     }
 
     private PipelineUpdateMessage CreateUpdate(string requirementId, string updateType, PipelinePhase phase, string message, object? data = null)

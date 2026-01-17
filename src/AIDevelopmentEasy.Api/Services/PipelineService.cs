@@ -46,6 +46,9 @@ public class PipelineService : IPipelineService
 
     // Track running pipelines and their state
     private static readonly ConcurrentDictionary<string, PipelineExecution> _runningPipelines = new();
+    
+    // Track completed pipelines for status retrieval (keeps last N completed for memory efficiency)
+    private static readonly ConcurrentDictionary<string, PipelineStatusDto> _completedPipelines = new();
 
     public PipelineService(
         IRequirementRepository requirementRepository,
@@ -117,20 +120,50 @@ public class PipelineService : IPipelineService
         return execution.Status;
     }
 
-    public Task<PipelineStatusDto?> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default)
+    public async Task<PipelineStatusDto?> GetStatusAsync(string requirementId, CancellationToken cancellationToken = default)
     {
+        // Check running pipelines first
         if (_runningPipelines.TryGetValue(requirementId, out var execution))
         {
-            return Task.FromResult<PipelineStatusDto?>(execution.Status);
+            return execution.Status;
+        }
+
+        // Check completed pipelines (in-memory cache)
+        if (_completedPipelines.TryGetValue(requirementId, out var completedStatus))
+        {
+            return completedStatus;
+        }
+
+        // Try to load from disk (for completed pipelines after restart)
+        var historyJson = await _outputRepository.GetPipelineHistoryAsync(requirementId, cancellationToken);
+        if (!string.IsNullOrEmpty(historyJson))
+        {
+            try
+            {
+                var status = System.Text.Json.JsonSerializer.Deserialize<PipelineStatusDto>(historyJson, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                if (status != null)
+                {
+                    // Cache it for future requests
+                    _completedPipelines[requirementId] = status;
+                    return status;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to deserialize pipeline history for {RequirementId}", requirementId);
+            }
         }
 
         // Return a "not running" status
-        return Task.FromResult<PipelineStatusDto?>(new PipelineStatusDto
+        return new PipelineStatusDto
         {
             RequirementId = requirementId,
             CurrentPhase = PipelinePhase.None,
             IsRunning = false
-        });
+        };
     }
 
     public Task<bool> ApprovePhaseAsync(string requirementId, PipelinePhase phase, CancellationToken cancellationToken = default)
@@ -551,6 +584,12 @@ public class PipelineService : IPipelineService
 
             if (!codingResult.Approved) return;
 
+            // Store generated files in execution for later use (e.g., fix task generation)
+            if (codingResult.Result is { } result && result.GetType().GetProperty("Files")?.GetValue(result) is Dictionary<string, string> files)
+            {
+                execution.GeneratedFiles = files;
+            }
+
             // Phase 4: Debugging (DebuggerAgent - verify and fix code)
             var debugResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
             {
@@ -772,13 +811,25 @@ public class PipelineService : IPipelineService
                         // Rollback and retry from Coding phase
                         await HandleRetryAsync(execution, integrationTestResult.FixTasks!, ct);
 
-                        // Pipeline is now ready for re-execution with fix tasks
-                        // User needs to restart the pipeline or it will be auto-restarted
                         await _notificationService.NotifyProgressAsync(requirementId,
-                            $"Retry prepared. Fix tasks have been created. Pipeline ready for re-execution.");
+                            $"🔄 Restarting from Coding phase with fix tasks...");
 
-                        // Mark as needing retry (not failed, not completed)
-                        await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Planned, ct);
+                        // CRITICAL: Re-execute Coding phase with fix tasks
+                        // Reset phases from Coding onwards to Pending
+                        foreach (var phase in execution.Status.Phases)
+                        {
+                            if (phase.Phase >= PipelinePhase.Coding && phase.Phase != PipelinePhase.Analysis && phase.Phase != PipelinePhase.Planning)
+                            {
+                                phase.State = PhaseState.Pending;
+                                phase.Result = null;
+                                phase.Message = null;
+                                phase.StartedAt = null;
+                                phase.CompletedAt = null;
+                            }
+                        }
+
+                        // Re-run the pipeline from Coding phase (recursive call with retry context)
+                        await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, requirement, ct);
                         return;
                     }
 
@@ -859,6 +910,13 @@ public class PipelineService : IPipelineService
 
             execution.Status.CurrentPhase = PipelinePhase.Completed;
             execution.Status.CompletedAt = DateTime.UtcNow;
+            execution.Status.IsRunning = false;
+            
+            // Store completed status for later retrieval (in-memory)
+            _completedPipelines[requirementId] = CloneStatus(execution.Status);
+            
+            // Save pipeline history to disk for permanent access
+            await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
         }
         catch (OperationCanceledException)
         {
@@ -1391,8 +1449,8 @@ public class PipelineService : IPipelineService
                 _logger.LogWarning("[{RequirementId}] Integration tests failed: {Failed}/{Total}",
                     requirementId, testResults.Failed, testResults.TotalTests);
 
-                // Generate fix tasks from test failures
-                var fixTasks = GenerateFixTasksFromTestFailures(testResults);
+                // Generate fix tasks from test failures - pass generated files, codebase analysis, and deployment result for full context
+                var fixTasks = GenerateFixTasksFromTestFailures(testResults, execution.GeneratedFiles, codebaseAnalysis, deploymentResult);
 
                 // Check if this is a breaking change (existing tests failing)
                 if (testResults.IsBreakingChange)
@@ -1558,29 +1616,240 @@ public class PipelineService : IPipelineService
     }
 
     /// <summary>
-    /// Generate fix tasks from test failures
+    /// Generate fix tasks from test failures with detailed context for LLM
+    /// Uses codebase analysis for project structure, conventions, and file paths
     /// </summary>
-    private List<FixTaskDto> GenerateFixTasksFromTestFailures(TestSummaryDto testSummary)
+    private List<FixTaskDto> GenerateFixTasksFromTestFailures(
+        TestSummaryDto testSummary,
+        Dictionary<string, string>? generatedFiles = null,
+        Core.Models.CodebaseAnalysis? codebaseAnalysis = null,
+        DeploymentResult? deploymentResult = null)
     {
         var fixTasks = new List<FixTaskDto>();
         int index = 1;
 
-        foreach (var failedTest in testSummary.FailedTests)
+        // Group failed tests by the implementation they're testing
+        var failedTestGroups = testSummary.FailedTests
+            .GroupBy(t => ExtractImplementationClassName(t.TestName, t.ClassName))
+            .ToList();
+
+        foreach (var group in failedTestGroups)
         {
+            var implementationClass = group.Key;
+            var failedTests = group.ToList();
+
+            // Find the implementation file from generated files
+            string implementationFile = "";
+            string implementationCode = "";
+            string testFile = "";
+            string testCode = "";
+            string projectName = "";
+            string targetNamespace = "";
+            string fullPath = "";  // Actual file path in codebase for modification
+
+            if (generatedFiles != null)
+            {
+                // Find implementation file (e.g., DateTimeHelper.cs)
+                var implFileEntry = generatedFiles.FirstOrDefault(f =>
+                    f.Key.Contains($"{implementationClass}.cs", StringComparison.OrdinalIgnoreCase) &&
+                    !f.Key.Contains("Test", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(implFileEntry.Key))
+                {
+                    implementationFile = implFileEntry.Key;
+                    implementationCode = implFileEntry.Value;
+                    // Extract project name from path (e.g., "Picus.Common.Dev/Helpers/DateTimeHelper.cs")
+                    var parts = implFileEntry.Key.Split('/');
+                    if (parts.Length > 0)
+                    {
+                        projectName = parts[0];
+                    }
+                    // Extract namespace from code
+                    var nsMatch = System.Text.RegularExpressions.Regex.Match(implementationCode, @"namespace\s+([\w.]+)");
+                    if (nsMatch.Success)
+                    {
+                        targetNamespace = nsMatch.Groups[1].Value;
+                    }
+
+                    // Try to find full path from deployment result
+                    if (deploymentResult?.CopiedFiles != null)
+                    {
+                        var deployedFile = deploymentResult.CopiedFiles.FirstOrDefault(df =>
+                            df.TargetPath.EndsWith($"{implementationClass}.cs", StringComparison.OrdinalIgnoreCase) &&
+                            !df.TargetPath.Contains("Test", StringComparison.OrdinalIgnoreCase));
+                        if (deployedFile != null)
+                        {
+                            fullPath = deployedFile.TargetPath;
+                        }
+                    }
+                }
+
+                // Find test file
+                var testFileEntry = generatedFiles.FirstOrDefault(f =>
+                    f.Key.Contains($"{implementationClass}Tests.cs", StringComparison.OrdinalIgnoreCase) ||
+                    f.Key.Contains($"{implementationClass}Test.cs", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(testFileEntry.Key))
+                {
+                    testFile = testFileEntry.Key;
+                    testCode = testFileEntry.Value;
+                }
+            }
+
+            // Build detailed error description
+            var errorDetails = new System.Text.StringBuilder();
+            errorDetails.AppendLine($"The following test(s) failed for {implementationClass}:");
+            errorDetails.AppendLine();
+
+            foreach (var test in failedTests)
+            {
+                errorDetails.AppendLine($"❌ Test: {test.TestName}");
+                errorDetails.AppendLine($"   Error: {test.ErrorMessage}");
+                if (!string.IsNullOrEmpty(test.StackTrace))
+                {
+                    var relevantStack = test.StackTrace.Split('\n').Take(3);
+                    errorDetails.AppendLine($"   Stack: {string.Join(" → ", relevantStack)}");
+                }
+                errorDetails.AppendLine();
+            }
+
+            // Build comprehensive fix task description
+            var description = new System.Text.StringBuilder();
+            description.AppendLine("## ⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY ⚠️");
+            description.AppendLine();
+            description.AppendLine("**DO NOT create a new file or new class!**");
+            description.AppendLine("**You MUST modify the EXISTING code below to fix the test failure.**");
+            description.AppendLine();
+
+            // Add codebase context if available
+            if (codebaseAnalysis != null)
+            {
+                description.AppendLine("---");
+                description.AppendLine();
+                description.AppendLine("## CODEBASE CONTEXT");
+                description.AppendLine($"- **Codebase:** {codebaseAnalysis.CodebaseName}");
+                description.AppendLine($"- **Target Framework:** {codebaseAnalysis.Projects.FirstOrDefault(p => p.Name == projectName)?.TargetFramework ?? "Unknown"}");
+                
+                // Add coding conventions
+                if (codebaseAnalysis.Conventions != null)
+                {
+                    description.AppendLine();
+                    description.AppendLine("### Coding Conventions (MUST FOLLOW):");
+                    if (!string.IsNullOrEmpty(codebaseAnalysis.Conventions.NamingStyle))
+                        description.AppendLine($"- Naming Style: {codebaseAnalysis.Conventions.NamingStyle}");
+                    if (!string.IsNullOrEmpty(codebaseAnalysis.Conventions.PrivateFieldPrefix))
+                        description.AppendLine($"- Private Field Prefix: {codebaseAnalysis.Conventions.PrivateFieldPrefix}");
+                    if (codebaseAnalysis.Conventions.UsesXmlDocs)
+                        description.AppendLine("- Uses XML Documentation: Yes");
+                    if (codebaseAnalysis.Conventions.UsesAsyncSuffix)
+                        description.AppendLine("- Uses Async Suffix: Yes (e.g., GetDataAsync)");
+                    if (!string.IsNullOrEmpty(codebaseAnalysis.Conventions.TestFramework))
+                        description.AppendLine($"- Test Framework: {codebaseAnalysis.Conventions.TestFramework}");
+                }
+
+                // Add project info
+                var projectInfo = codebaseAnalysis.Projects.FirstOrDefault(p => 
+                    p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase) ||
+                    p.Name.Replace(".Dev", "").Equals(projectName.Replace(".Dev", ""), StringComparison.OrdinalIgnoreCase));
+                if (projectInfo != null)
+                {
+                    description.AppendLine();
+                    description.AppendLine($"### Project: {projectInfo.Name}");
+                    description.AppendLine($"- Root Namespace: {projectInfo.RootNamespace}");
+                    if (projectInfo.Namespaces.Count > 0)
+                        description.AppendLine($"- Available Namespaces: {string.Join(", ", projectInfo.Namespaces.Take(5))}");
+                    if (projectInfo.DetectedPatterns.Count > 0)
+                        description.AppendLine($"- Detected Patterns: {string.Join(", ", projectInfo.DetectedPatterns)}");
+                }
+            }
+
+            description.AppendLine();
+            description.AppendLine("---");
+            description.AppendLine();
+            description.AppendLine(errorDetails.ToString());
+
+            if (!string.IsNullOrEmpty(implementationCode))
+            {
+                description.AppendLine("---");
+                description.AppendLine();
+                description.AppendLine($"## EXISTING IMPLEMENTATION CODE");
+                description.AppendLine($"**File:** `{implementationFile}`");
+                if (!string.IsNullOrEmpty(fullPath))
+                    description.AppendLine($"**Full Path:** `{fullPath}`");
+                description.AppendLine();
+                description.AppendLine("**⚠️ Modify THIS code to fix the test - DO NOT create new file:**");
+                description.AppendLine();
+                description.AppendLine("```csharp");
+                description.AppendLine(implementationCode);
+                description.AppendLine("```");
+                description.AppendLine();
+            }
+
+            if (!string.IsNullOrEmpty(testCode))
+            {
+                description.AppendLine("---");
+                description.AppendLine();
+                description.AppendLine($"## TEST CODE (File: {testFile}) - For reference only");
+                description.AppendLine("**DO NOT modify the test, fix the implementation instead:**");
+                description.AppendLine();
+                description.AppendLine("```csharp");
+                description.AppendLine(testCode);
+                description.AppendLine("```");
+            }
+
+            description.AppendLine();
+            description.AppendLine("---");
+            description.AppendLine();
+            description.AppendLine("## YOUR TASK:");
+            description.AppendLine($"1. Keep the SAME namespace: `{targetNamespace}`");
+            description.AppendLine($"2. Keep the SAME class name: `{implementationClass}`");
+            description.AppendLine($"3. Keep the SAME file structure (do not rename or move the file)");
+            description.AppendLine("4. Only modify the method(s) that are causing the test to fail");
+            description.AppendLine("5. Return the COMPLETE fixed file content with ALL existing methods intact");
+            description.AppendLine("6. Follow the codebase conventions listed above");
+
             fixTasks.Add(new FixTaskDto
             {
                 Index = index++,
-                Title = $"Fix: {failedTest.TestName}",
-                Description = $"Fix the test failure in {failedTest.TestName}.\n\nError: {failedTest.ErrorMessage}",
-                TargetFile = failedTest.FilePath ?? "",
+                Title = $"Fix {implementationClass} - {failedTests.Count} test(s) failing",
+                Description = description.ToString(),
+                TargetFile = implementationFile,
                 Type = FixTaskType.TestFailure,
-                ErrorMessage = failedTest.ErrorMessage ?? "Test failed",
-                StackTrace = failedTest.StackTrace,
-                SuggestedFix = $"Review the test assertion and fix the implementation to make the test pass."
+                ErrorMessage = string.Join("; ", failedTests.Select(t => t.ErrorMessage)),
+                StackTrace = failedTests.FirstOrDefault()?.StackTrace,
+                SuggestedFix = $"Modify the existing {implementationClass} class to make the failing tests pass. Do NOT create new files.",
+                ProjectName = projectName,
+                Namespace = targetNamespace,
+                FullPath = fullPath  // For ExecuteModificationCodingAsync to use
             });
         }
 
         return fixTasks;
+    }
+
+    /// <summary>
+    /// Extract implementation class name from test method or class name
+    /// </summary>
+    private static string ExtractImplementationClassName(string testMethodName, string? testClassName)
+    {
+        // Try to extract from class name first (e.g., "DateTimeHelperTests" -> "DateTimeHelper")
+        if (!string.IsNullOrEmpty(testClassName))
+        {
+            var className = testClassName.Split('.').Last();
+            if (className.EndsWith("Tests"))
+                return className[..^5];
+            if (className.EndsWith("Test"))
+                return className[..^4];
+        }
+
+        // Try to extract from method name pattern (e.g., "GetEndOfDay_MaxValue_..." -> related to a class)
+        var methodParts = testMethodName.Split('_');
+        if (methodParts.Length > 0)
+        {
+            return methodParts[0];
+        }
+
+        return "Unknown";
     }
 
     /// <summary>
@@ -1609,14 +1878,23 @@ public class PipelineService : IPipelineService
         }
 
         // Convert fix tasks to regular tasks and save them
+        // IMPORTANT: Use the correct project name, namespace, and full path from fix task
         var tasks = fixTasks.Select((ft, i) => new TaskDto
         {
             Index = i + 1,
             Title = ft.Title,
-            Description = $"{ft.Description}\n\n**Error:** {ft.ErrorMessage}\n\n**Suggested Fix:** {ft.SuggestedFix}",
+            // Description already contains detailed instructions from GenerateFixTasksFromTestFailures
+            Description = ft.Description,
             TargetFiles = new List<string> { ft.TargetFile },
             Status = Models.TaskStatus.Pending,
-            ProjectName = "fix"
+            // Use the actual project name from the fix task, not "fix"
+            ProjectName = !string.IsNullOrEmpty(ft.ProjectName) ? ft.ProjectName : "default",
+            // Include namespace for proper code generation
+            Namespace = ft.Namespace,
+            // Mark as modification so CoderAgent knows to modify existing code
+            IsModification = true,
+            // Full path for ExecuteModificationCodingAsync to read current content
+            FullPath = ft.FullPath
         }).ToList();
 
         await _taskRepository.SaveTasksAsync(requirementId, tasks, ct);
@@ -1639,5 +1917,325 @@ public class PipelineService : IPipelineService
 
         await _notificationService.NotifyProgressAsync(requirementId,
             $"Retry prepared with {fixTasks.Count} fix task(s). Returning to Coding phase...");
+    }
+
+    /// <summary>
+    /// Execute retry from Coding phase - used after unit test failures
+    /// </summary>
+    private async Task ExecuteRetryFromCodingAsync(
+        PipelineExecution execution,
+        Core.Models.CodebaseAnalysis? codebaseAnalysis,
+        RequirementDto? requirement,
+        CancellationToken ct)
+    {
+        var requirementId = execution.RequirementId;
+        var content = await _requirementRepository.GetContentAsync(requirementId, ct);
+
+        _logger.LogInformation("[{RequirementId}] Executing retry from Coding phase (Attempt {Attempt})",
+            requirementId, execution.RetryAttempt);
+
+        await _notificationService.NotifyProgressAsync(requirementId,
+            $"🔄 RETRY {execution.RetryAttempt}/{PipelineExecution.MaxRetryAttempts} - Starting Coding phase with fix tasks...");
+
+        // Phase: Coding (with fix tasks)
+        var codingResult = await ExecutePhaseAsync(execution, PipelinePhase.Coding, async () =>
+        {
+            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Coding,
+                $"Retry #{execution.RetryAttempt} - Fixing code based on test failures...");
+
+            var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+            var projectState = new ProjectState { Requirement = content ?? "" };
+            var generatedFiles = new ConcurrentDictionary<string, string>();
+
+            await _notificationService.NotifyProgressAsync(requirementId,
+                $"Processing {tasks.Count} fix task(s)...");
+
+            foreach (var task in tasks)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                await _notificationService.NotifyProgressAsync(requirementId, $"Fixing: {task.Title}");
+
+                // Use modification-aware coding if codebase is available
+                AgentResponse response;
+                if (codebaseAnalysis != null && !string.IsNullOrEmpty(requirement?.CodebaseId))
+                {
+                    response = await ExecuteModificationCodingAsync(task, projectState, requirement.CodebaseId, codebaseAnalysis, ct);
+                }
+                else
+                {
+                    response = await ExecuteGenerationCodingAsync(task, projectState, ct);
+                }
+
+                if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
+                    response.Data.TryGetValue("code", out var code))
+                {
+                    var projectName = task.ProjectName ?? "fix";
+                    var fileKey = $"{projectName}/{filename}";
+                    generatedFiles[fileKey] = code.ToString()!;
+                }
+
+                task.Status = Models.TaskStatus.Completed;
+                await _taskRepository.UpdateTaskAsync(requirementId, task, ct);
+            }
+
+            // Update project state
+            foreach (var kvp in generatedFiles)
+            {
+                projectState.Codebase[kvp.Key] = kvp.Value;
+            }
+
+            // Save output
+            var outputPath = await _outputRepository.SaveOutputAsync(
+                requirementId,
+                requirement?.Name ?? requirementId,
+                generatedFiles.ToDictionary(k => k.Key, v => v.Value),
+                ct);
+
+            return new
+            {
+                Files = generatedFiles.ToDictionary(k => k.Key, v => v.Value),
+                OutputPath = outputPath,
+                RetryAttempt = execution.RetryAttempt
+            };
+        }, ct);
+
+        if (!codingResult.Approved)
+        {
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            return;
+        }
+
+        // Phase: Debugging
+        var debuggingResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
+        {
+            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Debugging, "Checking for compilation errors...");
+
+            var tasks = (await _taskRepository.GetByRequirementAsync(requirementId, ct)).ToList();
+            var projectState = new ProjectState { Requirement = content ?? "" };
+
+            foreach (var task in tasks)
+            {
+                var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+                foreach (var kvp in outputFiles)
+                {
+                    projectState.Codebase[kvp.Key] = kvp.Value;
+                }
+
+                var response = await _debuggerAgent.RunAsync(
+                    new AgentRequest { Input = task.Description ?? "", ProjectState = projectState },
+                    ct);
+
+                if (!response.Success)
+                {
+                    await _notificationService.NotifyProgressAsync(requirementId, $"Debug issues found for task {task.Index}, fixing...");
+                }
+            }
+
+            return new { Status = "Debugging completed" };
+        }, ct);
+
+        if (!debuggingResult.Approved)
+        {
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            return;
+        }
+
+        // Phase: Reviewing
+        var reviewResult = await ExecutePhaseAsync(execution, PipelinePhase.Reviewing, async () =>
+        {
+            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Reviewing, "Reviewing generated code...");
+
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+            var reviewSummary = new Dictionary<string, object>();
+
+            foreach (var file in outputFiles)
+            {
+                var projectState = new ProjectState { Requirement = content ?? "" };
+                projectState.Codebase[file.Key] = file.Value;
+
+                var response = await _reviewerAgent.RunAsync(
+                    new AgentRequest { Input = file.Value, ProjectState = projectState },
+                    ct);
+
+                if (response.Success && response.Data != null)
+                {
+                    reviewSummary[file.Key] = response.Data;
+                }
+            }
+
+            return reviewSummary;
+        }, ct);
+
+        if (!reviewResult.Approved)
+        {
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            return;
+        }
+
+        // Phase: Deployment
+        DeploymentResult? lastDeploymentResult = null;
+        var deploymentResult = await ExecutePhaseAsync(execution, PipelinePhase.Deployment, async () =>
+        {
+            await _notificationService.NotifyPhaseStartedAsync(requirementId, PipelinePhase.Deployment, "Deploying retry code to codebase...");
+
+            var outputFiles = await _outputRepository.GetGeneratedFilesAsync(requirementId, ct);
+            if (codebaseAnalysis == null)
+            {
+                throw new InvalidOperationException("Codebase analysis is required for deployment");
+            }
+
+            lastDeploymentResult = await _deploymentAgent.DeployAsync(
+                codebaseAnalysis,
+                outputFiles.ToDictionary(k => k.Key, v => v.Value),
+                ct);
+
+            execution.LastDeploymentResult = lastDeploymentResult;
+
+            return new
+            {
+                lastDeploymentResult.Success,
+                lastDeploymentResult.TotalFilesCopied,
+                lastDeploymentResult.NewFilesCreated,
+                lastDeploymentResult.FilesModified,
+                ProjectsUpdated = lastDeploymentResult.UpdatedProjects.Count,
+                BuildResults = lastDeploymentResult.BuildResults.Select(b => new { b.Success, b.TargetPath, b.Error }).ToList()
+            };
+        }, ct);
+
+        if (!deploymentResult.Approved)
+        {
+            if (lastDeploymentResult != null && lastDeploymentResult.TotalFilesCopied > 0)
+            {
+                await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
+            }
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            return;
+        }
+
+        // Phase: Unit Testing (again)
+        var unitTestResult = await ExecuteUnitTestingPhaseAsync(execution, codebaseAnalysis!, lastDeploymentResult!, ct);
+
+        if (!unitTestResult.Approved)
+        {
+            // Check if we can retry again
+            if (unitTestResult.NeedsRetry && execution.RetryAttempt < PipelineExecution.MaxRetryAttempts)
+            {
+                await HandleRetryAsync(execution, unitTestResult.FixTasks!, ct);
+
+                // Reset phases and retry again
+                foreach (var phase in execution.Status.Phases)
+                {
+                    if (phase.Phase >= PipelinePhase.Coding && phase.Phase != PipelinePhase.Analysis && phase.Phase != PipelinePhase.Planning)
+                    {
+                        phase.State = PhaseState.Pending;
+                        phase.Result = null;
+                        phase.Message = null;
+                        phase.StartedAt = null;
+                        phase.CompletedAt = null;
+                    }
+                }
+
+                // Recursive retry
+                await ExecuteRetryFromCodingAsync(execution, codebaseAnalysis, requirement, ct);
+                return;
+            }
+
+            // Max retries reached or user aborted
+            if (lastDeploymentResult != null && lastDeploymentResult.TotalFilesCopied > 0)
+            {
+                await _deploymentAgent.RollbackAsync(lastDeploymentResult, ct);
+            }
+            await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Failed, ct);
+            return;
+        }
+
+        // Phase: Pull Request (optional)
+        var prPhaseStatus = execution.Status.Phases.First(p => p.Phase == PipelinePhase.PullRequest);
+        execution.CurrentPhase = PipelinePhase.PullRequest;
+        execution.Status.CurrentPhase = PipelinePhase.PullRequest;
+        prPhaseStatus.State = PhaseState.WaitingApproval;
+        prPhaseStatus.StartedAt = DateTime.UtcNow;
+
+        var prInfo = new
+        {
+            BranchName = $"feature/ai-{requirement?.Name?.ToLowerInvariant().Replace(" ", "-") ?? requirementId}",
+            FilesDeployed = lastDeploymentResult?.TotalFilesCopied ?? 0,
+            NewFiles = lastDeploymentResult?.NewFilesCreated ?? 0,
+            ModifiedFiles = lastDeploymentResult?.FilesModified ?? 0,
+            RetryAttempts = execution.RetryAttempt,
+            Message = "Tests passed after retry! Ready to create PR or complete."
+        };
+
+        prPhaseStatus.Result = prInfo;
+        prPhaseStatus.Message = $"Retry #{execution.RetryAttempt} successful! {prInfo.FilesDeployed} files deployed. Create PR?";
+
+        await _notificationService.NotifyPhaseCompletedAsync(requirementId, PipelinePhase.PullRequest,
+            prPhaseStatus.Message, prInfo);
+
+        // Wait for user decision
+        if (!execution.AutoApproveAll)
+        {
+            execution.PhaseApprovalTcs = new TaskCompletionSource<bool>();
+            var createPr = await execution.PhaseApprovalTcs.Task;
+
+            if (createPr)
+            {
+                // TODO: Create GitHub PR
+                prPhaseStatus.Message = "PR creation not yet implemented - deployment complete!";
+            }
+            else
+            {
+                prPhaseStatus.Message = "Completed without PR";
+            }
+        }
+
+        prPhaseStatus.State = PhaseState.Completed;
+        prPhaseStatus.CompletedAt = DateTime.UtcNow;
+
+        // Mark as completed
+        execution.CurrentPhase = PipelinePhase.Completed;
+        execution.Status.CurrentPhase = PipelinePhase.Completed;
+        execution.Status.IsRunning = false;
+        execution.Status.CompletedAt = DateTime.UtcNow;
+        
+        // Store completed status for later retrieval (in-memory)
+        _completedPipelines[requirementId] = CloneStatus(execution.Status);
+        
+        // Save pipeline history to disk for permanent access
+        await _outputRepository.SavePipelineHistoryAsync(requirementId, execution.Status, ct);
+
+        await _requirementRepository.UpdateStatusAsync(requirementId, RequirementStatus.Completed, ct);
+
+        var outputPath = await _outputRepository.GetOutputPathAsync(requirementId, ct);
+        await _notificationService.NotifyPipelineCompletedAsync(requirementId, outputPath ?? "");
+        await _notificationService.NotifyRequirementListChangedAsync();
+
+        _logger.LogInformation("[{RequirementId}] Pipeline completed successfully after {RetryAttempts} retry(s)!",
+            requirementId, execution.RetryAttempt);
+    }
+    
+    /// <summary>
+    /// Creates a deep clone of PipelineStatusDto to preserve state after pipeline completion
+    /// </summary>
+    private static PipelineStatusDto CloneStatus(PipelineStatusDto original)
+    {
+        return new PipelineStatusDto
+        {
+            RequirementId = original.RequirementId,
+            CurrentPhase = original.CurrentPhase,
+            IsRunning = original.IsRunning,
+            StartedAt = original.StartedAt,
+            CompletedAt = original.CompletedAt,
+            Phases = original.Phases.Select(p => new PhaseStatusDto
+            {
+                Phase = p.Phase,
+                State = p.State,
+                Message = p.Message,
+                StartedAt = p.StartedAt,
+                CompletedAt = p.CompletedAt,
+                Result = p.Result
+            }).ToList()
+        };
     }
 }
