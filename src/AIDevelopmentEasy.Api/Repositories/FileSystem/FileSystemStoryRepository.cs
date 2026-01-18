@@ -6,7 +6,7 @@ namespace AIDevelopmentEasy.Api.Repositories.FileSystem;
 
 /// <summary>
 /// File system based implementation of IStoryRepository.
-/// Stories are stored as .md, .txt, or .json files in the stories directory.
+/// Stories are stored as JSON files with unique IDs (STR-YYYYMMDD-XXXX format).
 /// </summary>
 public class FileSystemStoryRepository : IStoryRepository
 {
@@ -14,8 +14,10 @@ public class FileSystemStoryRepository : IStoryRepository
     private readonly IApprovalRepository _approvalRepository;
     private readonly ITaskRepository _taskRepository;
     private readonly ILogger<FileSystemStoryRepository> _logger;
+    private readonly JsonSerializerOptions _jsonOptions;
 
-    private static readonly string[] SupportedExtensions = { ".json", ".md", ".txt" };
+    // Legacy extensions for backward compatibility
+    private static readonly string[] LegacyExtensions = { ".md", ".txt" };
 
     public FileSystemStoryRepository(
         string storiesPath,
@@ -27,6 +29,11 @@ public class FileSystemStoryRepository : IStoryRepository
         _approvalRepository = approvalRepository;
         _taskRepository = taskRepository;
         _logger = logger;
+        _jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
 
         if (!Directory.Exists(_storiesPath))
         {
@@ -41,131 +48,104 @@ public class FileSystemStoryRepository : IStoryRepository
         if (!Directory.Exists(_storiesPath))
             return stories;
 
-        var files = Directory.GetFiles(_storiesPath)
-            .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLower()))
-            .OrderBy(f => f);
+        // Get new format stories (STR-*.json)
+        var jsonFiles = Directory.GetFiles(_storiesPath, "STR-*.json")
+            .OrderByDescending(f => File.GetCreationTimeUtc(f));
 
-        foreach (var file in files)
+        foreach (var file in jsonFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var story = await CreateStoryDtoFromFile(file, cancellationToken);
+            var story = await LoadStoryFromJsonAsync(file, cancellationToken);
             if (story != null)
             {
                 stories.Add(story);
             }
         }
 
-        return stories;
+        // Also load legacy format stories (.md, .txt files that don't start with STR-)
+        var legacyFiles = Directory.GetFiles(_storiesPath)
+            .Where(f => LegacyExtensions.Contains(Path.GetExtension(f).ToLower()))
+            .Where(f => !Path.GetFileName(f).StartsWith("STR-"))
+            .OrderByDescending(f => File.GetCreationTimeUtc(f));
+
+        foreach (var file in legacyFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var story = await LoadLegacyStoryAsync(file, cancellationToken);
+            if (story != null)
+            {
+                stories.Add(story);
+            }
+        }
+
+        return stories.OrderByDescending(s => s.CreatedAt);
     }
 
     public async Task<StoryDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
-        var filePath = FindStoryFile(id);
-        if (filePath == null)
-            return null;
+        // Try new format first
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (File.Exists(jsonPath))
+        {
+            return await LoadStoryFromJsonAsync(jsonPath, cancellationToken);
+        }
 
-        return await CreateStoryDtoFromFile(filePath, cancellationToken);
+        // Try legacy format
+        var legacyPath = FindLegacyStoryFile(id);
+        if (legacyPath != null)
+        {
+            return await LoadLegacyStoryAsync(legacyPath, cancellationToken);
+        }
+
+        return null;
     }
 
     public async Task<string?> GetContentAsync(string id, CancellationToken cancellationToken = default)
     {
-        var filePath = FindStoryFile(id);
-        if (filePath == null)
-            return null;
-
-        return await File.ReadAllTextAsync(filePath, cancellationToken);
+        var story = await GetByIdAsync(id, cancellationToken);
+        return story?.Content;
     }
 
-    public async Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, CancellationToken cancellationToken = default)
+    public async Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, string? requirementId = null, CancellationToken cancellationToken = default)
     {
-        // All stories are now single-project type (stored as .md)
-        var extension = ".md";
-        var fileName = SanitizeFileName(name) + extension;
-        var filePath = Path.Combine(_storiesPath, fileName);
+        // Generate unique ID
+        var id = GenerateId();
 
-        // Ensure unique filename
-        var counter = 1;
-        while (File.Exists(filePath))
+        var storyData = new StoryData
         {
-            fileName = $"{SanitizeFileName(name)}_{counter}{extension}";
-            filePath = Path.Combine(_storiesPath, fileName);
-            counter++;
-        }
+            Id = id,
+            Name = name,
+            Content = content,
+            Type = type,
+            CodebaseId = codebaseId,
+            RequirementId = requirementId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
 
-        await File.WriteAllTextAsync(filePath, content, cancellationToken);
+        await SaveStoryDataAsync(storyData, cancellationToken);
 
-        var id = Path.GetFileNameWithoutExtension(fileName);
-
-        // Save codebaseId in metadata file if provided
-        if (!string.IsNullOrEmpty(codebaseId))
-        {
-            await SaveCodebaseIdAsync(id, codebaseId, cancellationToken);
-        }
-
-        _logger.LogInformation("Created story file: {FilePath} (codebaseId: {CodebaseId})", filePath, codebaseId ?? "none");
+        _logger.LogInformation("Created story: {Id} - {Name} (codebaseId: {CodebaseId}, requirementId: {RequirementId})", 
+            id, name, codebaseId ?? "none", requirementId ?? "none");
 
         return new StoryDto
         {
             Id = id,
-            Name = id,
+            Name = name,
             Content = content,
             Type = type,
             Status = StoryStatus.NotStarted,
             CodebaseId = codebaseId,
-            CreatedAt = DateTime.UtcNow
+            RequirementId = requirementId,
+            CreatedAt = storyData.CreatedAt
         };
-    }
-
-    /// <summary>
-    /// Save codebase ID for a story in a metadata file
-    /// </summary>
-    private async Task SaveCodebaseIdAsync(string storyId, string codebaseId, CancellationToken cancellationToken)
-    {
-        var metadataDir = Path.Combine(_storiesPath, storyId);
-        Directory.CreateDirectory(metadataDir);
-        
-        var metadataPath = Path.Combine(metadataDir, "metadata.json");
-        var metadata = new StoryMetadata { CodebaseId = codebaseId };
-        
-        var json = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(metadataPath, json, cancellationToken);
-    }
-
-    /// <summary>
-    /// Load codebase ID for a story from metadata file
-    /// </summary>
-    private async Task<string?> LoadCodebaseIdAsync(string storyId, CancellationToken cancellationToken)
-    {
-        var metadataPath = Path.Combine(_storiesPath, storyId, "metadata.json");
-        
-        if (!File.Exists(metadataPath))
-            return null;
-
-        try
-        {
-            var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
-            var metadata = JsonSerializer.Deserialize<StoryMetadata>(json);
-            return metadata?.CodebaseId;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load metadata for story: {Id}", storyId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Metadata stored alongside story
-    /// </summary>
-    private class StoryMetadata
-    {
-        public string? CodebaseId { get; set; }
     }
 
     public async Task UpdateStatusAsync(string id, StoryStatus status, CancellationToken cancellationToken = default)
     {
-        // Status is managed through approval repository, this is for future database implementations
+        // Status is managed through approval repository
         switch (status)
         {
             case StoryStatus.InProgress:
@@ -180,18 +160,233 @@ public class FileSystemStoryRepository : IStoryRepository
                 await _approvalRepository.MarkCompletedAsync(id, cancellationToken);
                 break;
             case StoryStatus.Failed:
-                // Reset in-progress flag so it shows as failed, not running
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
-                // Save failed status to metadata file
                 await SaveFailedStatusAsync(id, cancellationToken);
                 break;
             case StoryStatus.NotStarted:
                 await _approvalRepository.ResetApprovalAsync(id, cancellationToken);
                 await _approvalRepository.ResetCompletionAsync(id, cancellationToken);
                 await _approvalRepository.ResetInProgressAsync(id, cancellationToken);
-                // Clear failed status if exists
                 await ClearFailedStatusAsync(id, cancellationToken);
                 break;
+        }
+    }
+
+    public async Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default)
+    {
+        // Try new format first
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (File.Exists(jsonPath))
+        {
+            var storyData = await LoadStoryDataAsync(jsonPath, cancellationToken);
+            if (storyData != null)
+            {
+                storyData.Content = content;
+                storyData.UpdatedAt = DateTime.UtcNow;
+                await SaveStoryDataAsync(storyData, cancellationToken);
+                _logger.LogInformation("Updated story content: {Id}", id);
+                return true;
+            }
+        }
+
+        // Try legacy format
+        var legacyPath = FindLegacyStoryFile(id);
+        if (legacyPath != null)
+        {
+            await File.WriteAllTextAsync(legacyPath, content, cancellationToken);
+            _logger.LogInformation("Updated legacy story content: {Id}", id);
+            return true;
+        }
+
+        return false;
+    }
+
+    public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var deleted = false;
+
+        // Delete new format
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (File.Exists(jsonPath))
+        {
+            File.Delete(jsonPath);
+            deleted = true;
+        }
+
+        // Delete legacy format
+        var legacyPath = FindLegacyStoryFile(id);
+        if (legacyPath != null)
+        {
+            File.Delete(legacyPath);
+            deleted = true;
+        }
+
+        // Delete associated folder (tasks, approvals, etc.)
+        var folderPath = Path.Combine(_storiesPath, id);
+        if (Directory.Exists(folderPath))
+        {
+            Directory.Delete(folderPath, recursive: true);
+        }
+
+        if (deleted)
+        {
+            _logger.LogInformation("Deleted story: {Id}", id);
+        }
+
+        return Task.FromResult(deleted);
+    }
+
+    public Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (File.Exists(jsonPath))
+            return Task.FromResult(true);
+
+        return Task.FromResult(FindLegacyStoryFile(id) != null);
+    }
+
+    #region Private Methods
+
+    private string GenerateId()
+    {
+        // Format: STR-YYYYMMDD-XXXX (similar to REQ-YYYYMMDD-XXXX)
+        var date = DateTime.UtcNow.ToString("yyyyMMdd");
+        var random = Guid.NewGuid().ToString("N")[..4].ToUpper();
+        return $"STR-{date}-{random}";
+    }
+
+    private async Task SaveStoryDataAsync(StoryData data, CancellationToken cancellationToken)
+    {
+        var filePath = Path.Combine(_storiesPath, $"{data.Id}.json");
+        var json = JsonSerializer.Serialize(data, _jsonOptions);
+        await File.WriteAllTextAsync(filePath, json, cancellationToken);
+    }
+
+    private async Task<StoryData?> LoadStoryDataAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var json = await File.ReadAllTextAsync(filePath, cancellationToken);
+            return JsonSerializer.Deserialize<StoryData>(json, _jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load story data from: {Path}", filePath);
+            return null;
+        }
+    }
+
+    private async Task<StoryDto?> LoadStoryFromJsonAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var data = await LoadStoryDataAsync(filePath, cancellationToken);
+            if (data == null)
+                return null;
+
+            var status = await GetStoryStatusAsync(data.Id, cancellationToken);
+            var tasks = await _taskRepository.GetByStoryAsync(data.Id, cancellationToken);
+
+            return new StoryDto
+            {
+                Id = data.Id,
+                Name = data.Name,
+                Content = data.Content,
+                Type = data.Type,
+                Status = status,
+                CodebaseId = data.CodebaseId,
+                RequirementId = data.RequirementId,
+                CreatedAt = data.CreatedAt,
+                LastProcessedAt = data.UpdatedAt,
+                Tasks = tasks.ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading story from: {Path}", filePath);
+            return null;
+        }
+    }
+
+    private async Task<StoryDto?> LoadLegacyStoryAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fileName = Path.GetFileName(filePath);
+            var id = Path.GetFileNameWithoutExtension(fileName);
+            var content = await File.ReadAllTextAsync(filePath, cancellationToken);
+
+            var status = await GetStoryStatusAsync(id, cancellationToken);
+            var tasks = await _taskRepository.GetByStoryAsync(id, cancellationToken);
+
+            // Load legacy metadata if exists
+            var metadata = await LoadLegacyMetadataAsync(id, cancellationToken);
+
+            return new StoryDto
+            {
+                Id = id,
+                Name = id, // For legacy stories, name = id
+                Content = content,
+                Type = StoryType.Single,
+                Status = status,
+                CodebaseId = metadata?.CodebaseId,
+                RequirementId = metadata?.RequirementId,
+                CreatedAt = File.GetCreationTimeUtc(filePath),
+                LastProcessedAt = File.GetLastWriteTimeUtc(filePath),
+                Tasks = tasks.ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading legacy story from: {Path}", filePath);
+            return null;
+        }
+    }
+
+    private async Task<StoryStatus> GetStoryStatusAsync(string id, CancellationToken cancellationToken)
+    {
+        // Check if failed first
+        var failedFile = Path.Combine(_storiesPath, id, ".failed");
+        if (File.Exists(failedFile))
+            return StoryStatus.Failed;
+
+        var status = await _approvalRepository.GetStatusAsync(id, cancellationToken);
+        var hasTasks = await _taskRepository.HasTasksAsync(id, cancellationToken);
+
+        // Adjust status based on tasks
+        if (status == StoryStatus.NotStarted && hasTasks)
+            return StoryStatus.Planned;
+
+        return status;
+    }
+
+    private string? FindLegacyStoryFile(string id)
+    {
+        foreach (var ext in LegacyExtensions)
+        {
+            var path = Path.Combine(_storiesPath, id + ext);
+            if (File.Exists(path))
+                return path;
+        }
+        return null;
+    }
+
+    private async Task<LegacyMetadata?> LoadLegacyMetadataAsync(string storyId, CancellationToken cancellationToken)
+    {
+        var metadataPath = Path.Combine(_storiesPath, storyId, "metadata.json");
+        
+        if (!File.Exists(metadataPath))
+            return null;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
+            return JsonSerializer.Deserialize<LegacyMetadata>(json, _jsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load legacy metadata for story: {Id}", storyId);
+            return null;
         }
     }
 
@@ -215,107 +410,33 @@ public class FileSystemStoryRepository : IStoryRepository
         return Task.CompletedTask;
     }
 
-    public async Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default)
-    {
-        var filePath = FindStoryFile(id);
-        if (filePath == null)
-            return false;
+    #endregion
 
-        await File.WriteAllTextAsync(filePath, content, cancellationToken);
-        _logger.LogInformation("Updated story content: {Id}", id);
-        return true;
+    #region Data Classes
+
+    /// <summary>
+    /// Story data stored in JSON file
+    /// </summary>
+    private class StoryData
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public StoryType Type { get; set; }
+        public string? CodebaseId { get; set; }
+        public string? RequirementId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
     }
 
-    public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Legacy metadata format
+    /// </summary>
+    private class LegacyMetadata
     {
-        var filePath = FindStoryFile(id);
-        if (filePath == null)
-            return Task.FromResult(false);
-
-        File.Delete(filePath);
-
-        // Also delete associated folder
-        var folderPath = Path.Combine(_storiesPath, id);
-        if (Directory.Exists(folderPath))
-        {
-            Directory.Delete(folderPath, recursive: true);
-        }
-
-        _logger.LogInformation("Deleted story: {Id}", id);
-        return Task.FromResult(true);
+        public string? CodebaseId { get; set; }
+        public string? RequirementId { get; set; }
     }
 
-    public Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(FindStoryFile(id) != null);
-    }
-
-    private string? FindStoryFile(string id)
-    {
-        foreach (var ext in SupportedExtensions)
-        {
-            var path = Path.Combine(_storiesPath, id + ext);
-            if (File.Exists(path))
-                return path;
-        }
-        return null;
-    }
-
-    private async Task<StoryDto?> CreateStoryDtoFromFile(string filePath, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var fileName = Path.GetFileName(filePath);
-            var id = Path.GetFileNameWithoutExtension(fileName);
-            var extension = Path.GetExtension(filePath).ToLower();
-            var content = await File.ReadAllTextAsync(filePath, cancellationToken);
-
-            // All stories are now single-project type
-            var type = StoryType.Single;
-            var status = await _approvalRepository.GetStatusAsync(id, cancellationToken);
-            var hasTasks = await _taskRepository.HasTasksAsync(id, cancellationToken);
-
-            // Check if failed (overrides other statuses)
-            var failedFile = Path.Combine(_storiesPath, id, ".failed");
-            if (File.Exists(failedFile))
-            {
-                status = StoryStatus.Failed;
-            }
-            // Adjust status based on tasks
-            else if (status == StoryStatus.NotStarted && hasTasks)
-            {
-                status = StoryStatus.Planned;
-            }
-
-            var tasks = await _taskRepository.GetByStoryAsync(id, cancellationToken);
-            
-            // Load codebaseId from metadata
-            var codebaseId = await LoadCodebaseIdAsync(id, cancellationToken);
-
-            return new StoryDto
-            {
-                Id = id,
-                Name = id,
-                Content = content,
-                Type = type,
-                Status = status,
-                CodebaseId = codebaseId,
-                CreatedAt = File.GetCreationTimeUtc(filePath),
-                LastProcessedAt = File.GetLastWriteTimeUtc(filePath),
-                Tasks = tasks.ToList()
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error reading story file: {FilePath}", filePath);
-            return null;
-        }
-    }
-
-    private static string SanitizeFileName(string name)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var sanitized = new string(name.Where(c => !invalidChars.Contains(c)).ToArray());
-        return sanitized.Replace(' ', '-').ToLower();
-    }
+    #endregion
 }

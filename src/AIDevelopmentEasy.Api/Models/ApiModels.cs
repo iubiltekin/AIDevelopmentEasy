@@ -11,6 +11,10 @@ public class StoryDto
     public StoryType Type { get; set; }
     public StoryStatus Status { get; set; }
     public string? CodebaseId { get; set; }
+    /// <summary>
+    /// The requirement this story was created from (if any)
+    /// </summary>
+    public string? RequirementId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? LastProcessedAt { get; set; }
     public List<TaskDto> Tasks { get; set; } = new();
@@ -198,6 +202,10 @@ public class CreateStoryRequest
     public string Content { get; set; } = string.Empty;
     public StoryType Type { get; set; }
     public string? CodebaseId { get; set; }
+    /// <summary>
+    /// The requirement this story was created from (if any)
+    /// </summary>
+    public string? RequirementId { get; set; }
 }
 
 /// <summary>

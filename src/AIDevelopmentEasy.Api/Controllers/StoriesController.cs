@@ -116,6 +116,7 @@ public class StoriesController : ControllerBase
             request.Content,
             request.Type,
             request.CodebaseId,
+            request.RequirementId,
             cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = story.Id }, story);

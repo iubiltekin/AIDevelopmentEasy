@@ -1,7 +1,8 @@
-export { Dashboard } from './Dashboard';
+export { Stories } from './Stories';
 export { StoryDetail } from './StoryDetail';
-export { NewStory } from './NewStory';
 export { PipelineView } from './PipelineView';
 export { Settings } from './Settings';
 export { Codebases } from './Codebases';
 export { CodebaseDetail } from './CodebaseDetail';
+export { default as Requirements } from './Requirements';
+export { default as RequirementDetail } from './RequirementDetail';

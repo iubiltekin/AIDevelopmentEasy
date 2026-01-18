@@ -73,6 +73,8 @@ export interface StoryDto {
   type?: StoryType;  // Optional for backward compatibility
   status: StoryStatus;
   codebaseId?: string;
+  /** The requirement this story was created from (if any) */
+  requirementId?: string;
   createdAt: string;
   lastProcessedAt?: string;
   tasks: TaskDto[];
@@ -368,4 +370,265 @@ export function getPhaseStateColor(state: PhaseState): string {
     [PhaseState.Skipped]: 'text-slate-500'
   };
   return colors[state] || 'text-slate-400';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Requirement Types
+// ════════════════════════════════════════════════════════════════════════════
+
+export enum RequirementType {
+  Feature = 0,
+  Improvement = 1,
+  Defect = 2,
+  TechDebt = 3
+}
+
+export enum RequirementStatus {
+  Draft = 0,
+  InProgress = 1,
+  Completed = 2,
+  Cancelled = 3,
+  Failed = 4
+}
+
+export enum WizardPhase {
+  Input = 0,
+  Analysis = 1,
+  Questions = 2,
+  Refinement = 3,
+  Decomposition = 4,
+  Review = 5,
+  Completed = 6
+}
+
+export enum WizardPhaseState {
+  Pending = 0,
+  Running = 1,
+  WaitingApproval = 2,
+  Completed = 3,
+  Failed = 4,
+  Skipped = 5
+}
+
+export enum QuestionCategory {
+  Functional = 0,
+  NonFunctional = 1,
+  Technical = 2,
+  Business = 3,
+  UX = 4
+}
+
+export enum QuestionType {
+  Single = 0,
+  Multiple = 1,
+  Text = 2
+}
+
+export enum StoryComplexity {
+  Small = 0,
+  Medium = 1,
+  Large = 2
+}
+
+export interface RequirementDto {
+  id: string;
+  title: string;
+  rawContent: string;
+  finalContent?: string;
+  type: RequirementType;
+  status: RequirementStatus;
+  currentPhase: WizardPhase;
+  codebaseId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  storyCount: number;
+  createdStoryIds: string[];
+}
+
+export interface RequirementDetailDto extends RequirementDto {
+  questions?: QuestionSetDto;
+  answers?: AnswerSetDto;
+  aiNotes?: string;
+  generatedStories: StoryDefinitionDto[];
+}
+
+export interface QuestionSetDto {
+  questions: QuestionDto[];
+}
+
+export interface QuestionDto {
+  id: string;
+  category: QuestionCategory;
+  text: string;
+  type: QuestionType;
+  options: string[];
+  required: boolean;
+  context?: string;
+}
+
+export interface AnswerSetDto {
+  answers: AnswerDto[];
+}
+
+export interface AnswerDto {
+  questionId: string;
+  selectedOptions: string[];
+  textResponse?: string;
+}
+
+export interface StoryDefinitionDto {
+  id: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+  estimatedComplexity: StoryComplexity;
+  dependencies: string[];
+  technicalNotes?: string;
+  selected: boolean;
+}
+
+export interface WizardStatusDto {
+  requirementId: string;
+  currentPhase: WizardPhase;
+  isRunning: boolean;
+  phases: WizardPhaseStatusDto[];
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface WizardPhaseStatusDto {
+  phase: WizardPhase;
+  state: WizardPhaseState;
+  message?: string;
+  startedAt?: string;
+  completedAt?: string;
+  result?: unknown;
+}
+
+export interface CreateRequirementRequest {
+  title?: string;
+  rawContent: string;
+  type: RequirementType;
+  codebaseId?: string;
+}
+
+export interface SubmitAnswersRequest {
+  answers: AnswerDto[];
+  aiNotes?: string;
+}
+
+export interface CreateStoriesRequest {
+  selectedStoryIds: string[];
+}
+
+// Helper functions for Requirements
+export function getRequirementTypeLabel(type: RequirementType): string {
+  const labels: Record<RequirementType, string> = {
+    [RequirementType.Feature]: 'Feature',
+    [RequirementType.Improvement]: 'Improvement',
+    [RequirementType.Defect]: 'Defect / Bug',
+    [RequirementType.TechDebt]: 'Tech Debt / Refactor'
+  };
+  return labels[type] || 'Unknown';
+}
+
+export function getRequirementTypeColor(type: RequirementType): string {
+  const colors: Record<RequirementType, string> = {
+    [RequirementType.Feature]: 'bg-blue-500',
+    [RequirementType.Improvement]: 'bg-emerald-500',
+    [RequirementType.Defect]: 'bg-red-500',
+    [RequirementType.TechDebt]: 'bg-amber-500'
+  };
+  return colors[type] || 'bg-slate-500';
+}
+
+export function getRequirementStatusLabel(status: RequirementStatus): string {
+  const labels: Record<RequirementStatus, string> = {
+    [RequirementStatus.Draft]: 'Draft',
+    [RequirementStatus.InProgress]: 'In Progress',
+    [RequirementStatus.Completed]: 'Completed',
+    [RequirementStatus.Cancelled]: 'Cancelled',
+    [RequirementStatus.Failed]: 'Failed'
+  };
+  return labels[status] || 'Unknown';
+}
+
+export function getRequirementStatusColor(status: RequirementStatus): string {
+  const colors: Record<RequirementStatus, string> = {
+    [RequirementStatus.Draft]: 'bg-slate-500',
+    [RequirementStatus.InProgress]: 'bg-amber-500',
+    [RequirementStatus.Completed]: 'bg-emerald-500',
+    [RequirementStatus.Cancelled]: 'bg-slate-600',
+    [RequirementStatus.Failed]: 'bg-red-500'
+  };
+  return colors[status] || 'bg-slate-500';
+}
+
+export function getWizardPhaseLabel(phase: WizardPhase): string {
+  const labels: Record<WizardPhase, string> = {
+    [WizardPhase.Input]: 'Input',
+    [WizardPhase.Analysis]: 'Analysis',
+    [WizardPhase.Questions]: 'Questions',
+    [WizardPhase.Refinement]: 'Refinement',
+    [WizardPhase.Decomposition]: 'Decomposition',
+    [WizardPhase.Review]: 'Review',
+    [WizardPhase.Completed]: 'Completed'
+  };
+  return labels[phase] || 'Unknown';
+}
+
+export function getWizardPhaseDescription(phase: WizardPhase): string {
+  const descriptions: Record<WizardPhase, string> = {
+    [WizardPhase.Input]: 'Enter raw requirement and select type',
+    [WizardPhase.Analysis]: 'AI analyzing requirement and generating questions',
+    [WizardPhase.Questions]: 'Answer clarifying questions',
+    [WizardPhase.Refinement]: 'AI creating final requirement document',
+    [WizardPhase.Decomposition]: 'AI breaking down into stories',
+    [WizardPhase.Review]: 'Review and select stories to create',
+    [WizardPhase.Completed]: 'Wizard completed'
+  };
+  return descriptions[phase] || '';
+}
+
+export function getWizardPhaseStateColor(state: WizardPhaseState): string {
+  const colors: Record<WizardPhaseState, string> = {
+    [WizardPhaseState.Pending]: 'text-slate-400',
+    [WizardPhaseState.Running]: 'text-blue-400',
+    [WizardPhaseState.WaitingApproval]: 'text-amber-400',
+    [WizardPhaseState.Completed]: 'text-emerald-400',
+    [WizardPhaseState.Failed]: 'text-red-400',
+    [WizardPhaseState.Skipped]: 'text-slate-500'
+  };
+  return colors[state] || 'text-slate-400';
+}
+
+export function getQuestionCategoryLabel(category: QuestionCategory): string {
+  const labels: Record<QuestionCategory, string> = {
+    [QuestionCategory.Functional]: 'Functional',
+    [QuestionCategory.NonFunctional]: 'Non-Functional',
+    [QuestionCategory.Technical]: 'Technical',
+    [QuestionCategory.Business]: 'Business',
+    [QuestionCategory.UX]: 'UX'
+  };
+  return labels[category] || 'Unknown';
+}
+
+export function getStoryComplexityLabel(complexity: StoryComplexity): string {
+  const labels: Record<StoryComplexity, string> = {
+    [StoryComplexity.Small]: 'Small',
+    [StoryComplexity.Medium]: 'Medium',
+    [StoryComplexity.Large]: 'Large'
+  };
+  return labels[complexity] || 'Unknown';
+}
+
+export function getStoryComplexityColor(complexity: StoryComplexity): string {
+  const colors: Record<StoryComplexity, string> = {
+    [StoryComplexity.Small]: 'bg-emerald-500',
+    [StoryComplexity.Medium]: 'bg-amber-500',
+    [StoryComplexity.Large]: 'bg-red-500'
+  };
+  return colors[complexity] || 'bg-slate-500';
 }

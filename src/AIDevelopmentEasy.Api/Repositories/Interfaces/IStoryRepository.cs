@@ -26,7 +26,7 @@ public interface IStoryRepository
     /// <summary>
     /// Create a new story
     /// </summary>
-    Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, CancellationToken cancellationToken = default);
+    Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, string? requirementId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update story status

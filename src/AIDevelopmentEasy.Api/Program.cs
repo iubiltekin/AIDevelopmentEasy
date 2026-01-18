@@ -71,6 +71,7 @@ var storiesPath = Path.Combine(appDataDir, "stories");
 var outputPath = Path.Combine(appDataDir, "output");
 var promptsPath = Path.Combine(appDataDir, "prompts");
 var codebasesPath = Path.Combine(appDataDir, "codebases");
+var requirementsPath = Path.Combine(appDataDir, "requirements");
 
 // Ensure all directories exist
 Directory.CreateDirectory(appDataDir);
@@ -78,6 +79,7 @@ Directory.CreateDirectory(storiesPath);
 Directory.CreateDirectory(outputPath);
 Directory.CreateDirectory(promptsPath);
 Directory.CreateDirectory(codebasesPath);
+Directory.CreateDirectory(requirementsPath);
 
 // Copy default prompts if prompts directory is empty
 CopyDefaultPromptsIfNeeded(promptsPath);
@@ -153,6 +155,9 @@ builder.Services.AddSingleton<IOutputRepository>(sp =>
 builder.Services.AddSingleton<ICodebaseRepository>(sp =>
     new FileSystemCodebaseRepository(codebasesPath, sp.GetRequiredService<ILogger<FileSystemCodebaseRepository>>()));
 
+builder.Services.AddSingleton<IRequirementRepository>(sp =>
+    new FileSystemRequirementRepository(requirementsPath, sp.GetRequiredService<ILogger<FileSystemRequirementRepository>>()));
+
 // Agents
 builder.Services.AddSingleton(sp =>
     new CodeAnalysisAgent(sp.GetRequiredService<ILogger<CodeAnalysisAgent>>()));
@@ -179,9 +184,15 @@ builder.Services.AddSingleton(sp =>
         configuration: "LocalTest",
         nunitConsolePath: UnitTestAgent.DefaultNUnitConsolePath));
 
+builder.Services.AddSingleton(sp =>
+    new RequirementAnalystAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<RequirementAnalystAgent>>()));
+
 // Pipeline Services
 builder.Services.AddSingleton<IPipelineNotificationService, SignalRPipelineNotificationService>();
 builder.Services.AddSingleton<IPipelineService, PipelineService>();
+
+// Requirement Wizard Service
+builder.Services.AddSingleton<IRequirementWizardService, RequirementWizardService>();
 
 var app = builder.Build();
 

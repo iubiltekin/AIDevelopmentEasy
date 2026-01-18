@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { FileText, Play, RotateCcw, Trash2, Database } from 'lucide-react';
+import { FileText, Play, RotateCcw, Trash2, Database, ClipboardList } from 'lucide-react';
 import { StoryDto, StoryStatus } from '../types';
 import { StatusBadge } from './StatusBadge';
 
@@ -29,12 +29,25 @@ export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps)
             >
               {story.name}
             </Link>
-            {story.codebaseId && (
-              <div className="flex items-center gap-1 text-xs text-emerald-400 mt-0.5">
-                <Database className="w-3 h-3" />
-                With codebase context
-              </div>
-            )}
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-xs text-slate-500 font-mono">{story.id}</span>
+              {story.codebaseId && (
+                <div className="flex items-center gap-1 text-xs text-emerald-400">
+                  <Database className="w-3 h-3" />
+                  With codebase
+                </div>
+              )}
+              {story.requirementId && (
+                <Link 
+                  to={`/requirements/${story.requirementId}`}
+                  className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                  title="View source requirement"
+                >
+                  <ClipboardList className="w-3 h-3" />
+                  From requirement
+                </Link>
+              )}
+            </div>
           </div>
         </div>
         <StatusBadge status={story.status} />

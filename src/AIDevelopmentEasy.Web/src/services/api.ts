@@ -7,7 +7,13 @@ import type {
   CreateCodebaseRequest,
   ProjectSummaryDto,
   RetryInfoDto,
-  RetryAction
+  RetryAction,
+  RequirementDto,
+  RequirementDetailDto,
+  CreateRequirementRequest,
+  WizardStatusDto,
+  SubmitAnswersRequest,
+  CreateStoriesRequest
 } from '../types';
 
 const API_BASE = '/api';
@@ -211,5 +217,100 @@ export const codebasesApi = {
       method: 'DELETE'
     });
     await handleResponse<void>(response);
+  }
+};
+
+// Requirements API
+export const requirementsApi = {
+  getAll: async (): Promise<RequirementDto[]> => {
+    const response = await fetch(`${API_BASE}/requirements`);
+    return handleResponse<RequirementDto[]>(response);
+  },
+
+  getById: async (id: string): Promise<RequirementDetailDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}`);
+    return handleResponse<RequirementDetailDto>(response);
+  },
+
+  create: async (request: CreateRequirementRequest): Promise<RequirementDto> => {
+    const response = await fetch(`${API_BASE}/requirements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<RequirementDto>(response);
+  },
+
+  update: async (id: string, request: { title?: string; rawContent?: string; type?: number; codebaseId?: string | null }): Promise<RequirementDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<RequirementDto>(response);
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}`, {
+      method: 'DELETE'
+    });
+    await handleResponse<void>(response);
+  },
+
+  // Wizard operations
+  startWizard: async (id: string, autoApproveAll: boolean = false): Promise<WizardStatusDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoApproveAll })
+    });
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  getWizardStatus: async (id: string): Promise<WizardStatusDto | null> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/status`);
+    if (response.status === 404) {
+      return null;
+    }
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  approvePhase: async (id: string, approved: boolean = true, comment?: string): Promise<WizardStatusDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved, comment })
+    });
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  submitAnswers: async (id: string, request: SubmitAnswersRequest): Promise<WizardStatusDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  createStories: async (id: string, request: CreateStoriesRequest): Promise<WizardStatusDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/stories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  cancelWizard: async (id: string): Promise<WizardStatusDto> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/wizard/cancel`, {
+      method: 'POST'
+    });
+    return handleResponse<WizardStatusDto>(response);
+  },
+
+  getStories: async (id: string): Promise<string[]> => {
+    const response = await fetch(`${API_BASE}/requirements/${id}/stories`);
+    return handleResponse<string[]>(response);
   }
 };
