@@ -19,11 +19,46 @@ public class RequirementAnalystAgent : BaseAgent
 {
     public override string Name => "RequirementAnalyst";
     public override string Role => "Senior Systems Analyst - Analyzes requirements and decomposes into stories";
-    protected override string? PromptFileName => "requirement";
+    protected override string? PromptFileName => "requirement"; // Default fallback
 
     public RequirementAnalystAgent(OpenAIClient openAIClient, string deploymentName, ILogger<RequirementAnalystAgent>? logger = null)
         : base(openAIClient, deploymentName, logger)
     {
+    }
+
+    /// <summary>
+    /// Get the prompt file name for a specific requirement type.
+    /// Uses type-specific prompts: requirement-feature, requirement-defect, etc.
+    /// Falls back to generic "requirement" prompt if type-specific doesn't exist.
+    /// </summary>
+    private string GetPromptFileNameForType(RequirementType type)
+    {
+        var typeSpecificName = type switch
+        {
+            RequirementType.Feature => "requirement-feature",
+            RequirementType.Defect => "requirement-defect",
+            RequirementType.Improvement => "requirement-improvement",
+            RequirementType.TechDebt => "requirement-techdebt",
+            _ => "requirement"
+        };
+
+        // Check if type-specific prompt exists, otherwise use generic
+        if (Services.PromptLoader.Instance.PromptExists(typeSpecificName))
+        {
+            return typeSpecificName;
+        }
+
+        _logger?.LogInformation("[RequirementAnalyst] Type-specific prompt {Name} not found, using generic", typeSpecificName);
+        return "requirement";
+    }
+
+    /// <summary>
+    /// Get system prompt for a specific requirement type.
+    /// </summary>
+    private string GetSystemPromptForType(RequirementType type)
+    {
+        var promptFileName = GetPromptFileNameForType(type);
+        return Services.PromptLoader.Instance.LoadPrompt(promptFileName, GetFallbackPrompt());
     }
 
     /// <summary>
@@ -32,20 +67,23 @@ public class RequirementAnalystAgent : BaseAgent
     /// </summary>
     /// <param name="rawRequirement">The raw requirement text from user</param>
     /// <param name="requirementType">Type of requirement (Feature, Improvement, etc.)</param>
+    /// <param name="codebaseContext">Optional codebase context for context-aware analysis</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Analysis result with questions</returns>
     public async Task<AnalysisResult> AnalyzeAsync(
         string rawRequirement,
         RequirementType requirementType,
+        string? codebaseContext = null,
         CancellationToken cancellationToken = default)
     {
-        _logger?.LogInformation("[RequirementAnalyst] Starting analysis for {Type} requirement",
-            requirementType);
+        _logger?.LogInformation("[RequirementAnalyst] Starting analysis for {Type} requirement (codebase: {HasCodebase})",
+            requirementType, !string.IsNullOrEmpty(codebaseContext));
 
         try
         {
-            var systemPrompt = GetSystemPrompt();
-            var userPrompt = BuildAnalysisPrompt(rawRequirement, requirementType);
+            // Use type-specific prompt
+            var systemPrompt = GetSystemPromptForType(requirementType);
+            var userPrompt = BuildAnalysisPrompt(rawRequirement, requirementType, codebaseContext);
 
             var (content, tokens) = await CallLLMAsync(
                 systemPrompt,
@@ -100,7 +138,8 @@ public class RequirementAnalystAgent : BaseAgent
 
         try
         {
-            var systemPrompt = GetSystemPrompt();
+            // Use type-specific prompt
+            var systemPrompt = GetSystemPromptForType(requirementType);
             var userPrompt = BuildRefinePrompt(rawRequirement, requirementType, answers, aiNotes);
 
             var (content, tokens) = await CallLLMAsync(
@@ -147,7 +186,8 @@ public class RequirementAnalystAgent : BaseAgent
 
         try
         {
-            var systemPrompt = GetSystemPrompt();
+            // Use type-specific prompt
+            var systemPrompt = GetSystemPromptForType(requirementType);
             var userPrompt = BuildDecomposePrompt(finalRequirement, requirementType);
 
             var (content, tokens) = await CallLLMAsync(
@@ -185,10 +225,11 @@ public class RequirementAnalystAgent : BaseAgent
     {
         // This method is not typically used directly - use the specific methods instead
         // But we implement it for interface compliance
-        
+
         var result = await AnalyzeAsync(
             request.Input,
             RequirementType.Feature,
+            null, // No codebase context in generic run
             cancellationToken);
 
         return new AgentResponse
@@ -217,84 +258,34 @@ Your role is to help transform raw business needs into well-structured requireme
 
     #region Prompt Builders
 
-    private string BuildAnalysisPrompt(string rawRequirement, RequirementType type)
+    private string BuildAnalysisPrompt(string rawRequirement, RequirementType type, string? codebaseContext = null)
     {
+        // Type-specific guidelines are now in the prompt files (requirement-feature.md, etc.)
+        // Only add codebase context if available
+        var codebaseSection = string.IsNullOrEmpty(codebaseContext)
+            ? ""
+            : $@"
+
+## Codebase Context:
+This requirement is for an EXISTING codebase. Consider this context when generating questions:
+{codebaseContext}
+
+IMPORTANT: Since this is an existing codebase, also consider:
+- WHERE in the codebase the change should be made
+- HOW the change integrates with existing code
+- WHAT existing behavior might be affected
+";
+
         return $@"# TASK: Analyze Requirement and Generate Questions
 
 ## Requirement Type: {type}
-
+{codebaseSection}
 ## Raw Requirement:
 {rawRequirement}
 
-## Instructions:
+Analyze this requirement and generate clarifying questions following the guidelines in your system prompt.
 
-1. Analyze the raw requirement above
-2. Identify ALL missing information needed to make this requirement:
-   - Testable (clear acceptance criteria possible)
-   - Developable (enough detail for implementation)
-   - Complete (no ambiguous terms or undefined behavior)
-
-3. Generate clarifying questions for each gap
-4. Provide sensible options where possible (prefer multiple choice over free text)
-
-## Output Format:
-
-Return ONLY a JSON object with this structure:
-
-```json
-{{
-  ""questions"": [
-    {{
-      ""id"": ""Q1"",
-      ""category"": ""Functional"",
-      ""question"": ""What should happen when...?"",
-      ""type"": ""single"",
-      ""options"": [""Option A"", ""Option B"", ""Option C""],
-      ""required"": true,
-      ""context"": ""This is needed to determine the error handling behavior""
-    }},
-    {{
-      ""id"": ""Q2"",
-      ""category"": ""Technical"",
-      ""question"": ""Which data format should be used?"",
-      ""type"": ""multiple"",
-      ""options"": [""JSON"", ""XML"", ""CSV""],
-      ""required"": true,
-      ""context"": ""Affects the implementation approach""
-    }},
-    {{
-      ""id"": ""Q3"",
-      ""category"": ""Business"",
-      ""question"": ""Any additional context about the use case?"",
-      ""type"": ""text"",
-      ""options"": [],
-      ""required"": false,
-      ""context"": ""Optional: Helps understand the business context better""
-    }}
-  ]
-}}
-```
-
-## Question Categories:
-- **Functional**: What the system should do
-- **NonFunctional**: Performance, security, scalability requirements
-- **Technical**: Implementation details, technologies, integrations
-- **Business**: Business rules, constraints, priorities
-- **UX**: User experience, interface requirements
-
-## Question Types:
-- **single**: Radio buttons - user selects ONE option
-- **multiple**: Checkboxes - user can select MULTIPLE options
-- **text**: Free text input (use sparingly, only when options are not practical)
-
-## Guidelines:
-- Generate 3-8 questions (focus on the most critical gaps)
-- Prefer multiple choice questions with well-thought options
-- Include a ""context"" explaining why each question matters
-- Mark questions as required: true if they are essential
-- Order questions by importance (most critical first)
-
-Output ONLY the JSON, no additional text.";
+Output ONLY a valid JSON object with questions array.";
     }
 
     private string BuildRefinePrompt(string rawRequirement, RequirementType type, AnswerSet answers, string? aiNotes)

@@ -22,7 +22,9 @@ public class RequirementWizardService : IRequirementWizardService
 {
     private readonly IRequirementRepository _requirementRepository;
     private readonly IStoryRepository _storyRepository;
+    private readonly ICodebaseRepository _codebaseRepository;
     private readonly RequirementAnalystAgent _analystAgent;
+    private readonly CodeAnalysisAgent _codeAnalysisAgent;
     private readonly ILogger<RequirementWizardService> _logger;
 
     // Track running wizards
@@ -31,12 +33,16 @@ public class RequirementWizardService : IRequirementWizardService
     public RequirementWizardService(
         IRequirementRepository requirementRepository,
         IStoryRepository storyRepository,
+        ICodebaseRepository codebaseRepository,
         RequirementAnalystAgent analystAgent,
+        CodeAnalysisAgent codeAnalysisAgent,
         ILogger<RequirementWizardService> logger)
     {
         _requirementRepository = requirementRepository;
         _storyRepository = storyRepository;
+        _codebaseRepository = codebaseRepository;
         _analystAgent = analystAgent;
+        _codeAnalysisAgent = codeAnalysisAgent;
         _logger = logger;
     }
 
@@ -300,10 +306,18 @@ public class RequirementWizardService : IRequirementWizardService
                 throw new InvalidOperationException("Requirement not found");
             }
 
+            // Get codebase context if available
+            string? codebaseContext = null;
+            if (!string.IsNullOrEmpty(requirement.CodebaseId))
+            {
+                codebaseContext = await GetCodebaseContextAsync(requirement.CodebaseId, execution.CancellationTokenSource.Token);
+            }
+
             // Call LLM to analyze and generate questions
             var result = await _analystAgent.AnalyzeAsync(
                 requirement.RawContent,
                 requirement.Type,
+                codebaseContext,
                 execution.CancellationTokenSource.Token);
 
             if (!result.Success)
@@ -556,6 +570,32 @@ public class RequirementWizardService : IRequirementWizardService
             TechnicalNotes = def.TechnicalNotes,
             Selected = def.Selected
         };
+    }
+
+    private async Task<string?> GetCodebaseContextAsync(string codebaseId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var codebase = await _codebaseRepository.GetByIdAsync(codebaseId, cancellationToken);
+            if (codebase == null) return null;
+
+            var analysis = await _codebaseRepository.GetAnalysisAsync(codebaseId, cancellationToken);
+            if (analysis == null)
+            {
+                // Return basic info if no analysis
+                return $@"Codebase: {codebase.Name}
+Path: {codebase.Path}
+(No detailed analysis available)";
+            }
+
+            // Use the same context generator as PipelineService for consistency
+            return _codeAnalysisAgent.GenerateContextForPrompt(analysis);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Wizard] Error getting codebase context for {Id}", codebaseId);
+            return null;
+        }
     }
 
     #endregion

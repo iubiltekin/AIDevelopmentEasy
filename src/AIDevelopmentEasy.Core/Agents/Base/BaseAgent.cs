@@ -162,6 +162,11 @@ public abstract class BaseAgent : IAgent
                 Name, totalTokens, promptTokens, completionTokens, actualCost, duration.TotalSeconds);
         }
 
+        // Log raw LLM request/response for debugging
+        _logger?.LogDebug("[{Agent}] 📤 LLM REQUEST - System Prompt:\n{SystemPrompt}", Name, systemPrompt);
+        _logger?.LogDebug("[{Agent}] 📤 LLM REQUEST - User Prompt:\n{UserPrompt}", Name, userPrompt);
+        _logger?.LogDebug("[{Agent}] 📥 LLM RESPONSE (raw):\n{Response}", Name, content);
+
         // Record stats via callback (if registered)
         OnLLMCallCompleted?.Invoke(new LLMCallInfo
         {
@@ -221,6 +226,11 @@ public abstract class BaseAgent : IAgent
             _logger?.LogInformation("[{Agent}] ✅ LLM Complete (history) | Total: {Total:N0} tokens (in:{In:N0}, out:{Out:N0}) | Cost: ${Cost:F4} | Duration: {Duration:F1}s",
                 Name, totalTokens, promptTokens, completionTokens, actualCost, duration.TotalSeconds);
         }
+
+        // Log raw LLM request/response for debugging
+        _logger?.LogDebug("[{Agent}] 📤 LLM REQUEST (history) - System Prompt:\n{SystemPrompt}", Name, systemPrompt);
+        _logger?.LogDebug("[{Agent}] 📤 LLM REQUEST (history) - Messages: {Count} messages", Name, messages.Count);
+        _logger?.LogDebug("[{Agent}] 📥 LLM RESPONSE (raw):\n{Response}", Name, responseContent);
 
         // Record stats via callback (if registered)
         OnLLMCallCompleted?.Invoke(new LLMCallInfo
