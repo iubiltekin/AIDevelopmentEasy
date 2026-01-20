@@ -111,15 +111,39 @@ public class StoriesController : ControllerBase
             return BadRequest("Name and content are required");
         }
 
-        var story = await _storyRepository.CreateAsync(
-            request.Name,
-            request.Content,
-            request.Type,
-            request.CodebaseId,
-            request.RequirementId,
-            cancellationToken);
+        var story = await _storyRepository.CreateAsync(request, cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = story.Id }, story);
+    }
+
+    /// <summary>
+    /// Update story target information (project, file, class, method)
+    /// Use this before starting the pipeline to specify where changes should be made
+    /// </summary>
+    [HttpPut("{id}/target")]
+    public async Task<ActionResult> UpdateTarget(string id, [FromBody] UpdateStoryTargetRequest request, CancellationToken cancellationToken)
+    {
+        var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
+        
+        if (story == null)
+            return NotFound();
+
+        // Only allow updating target if story hasn't started processing
+        if (story.Status != StoryStatus.NotStarted && story.Status != StoryStatus.Planned)
+        {
+            return BadRequest(new { 
+                error = "Cannot update target", 
+                message = "Story must be reset before updating target info. Current status: " + story.Status 
+            });
+        }
+
+        var updated = await _storyRepository.UpdateTargetAsync(id, request, cancellationToken);
+        
+        if (!updated)
+            return NotFound();
+
+        _logger.LogInformation("Updated target for story: {Id} → {Project}/{File}", id, request.TargetProject, request.TargetFile);
+        return Ok(new { message = "Target information updated successfully" });
     }
 
     /// <summary>

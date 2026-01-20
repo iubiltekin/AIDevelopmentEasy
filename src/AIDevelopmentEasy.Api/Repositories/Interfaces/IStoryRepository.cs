@@ -29,9 +29,19 @@ public interface IStoryRepository
     Task<StoryDto> CreateAsync(string name, string content, StoryType type, string? codebaseId = null, string? requirementId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Create a new story with full request details including target info
+    /// </summary>
+    Task<StoryDto> CreateAsync(CreateStoryRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update story status
     /// </summary>
     Task UpdateStatusAsync(string id, StoryStatus status, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update story target information (project, file, class, method, change type)
+    /// </summary>
+    Task<bool> UpdateTargetAsync(string id, UpdateStoryTargetRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update story content (only allowed when status is NotStarted/Draft)

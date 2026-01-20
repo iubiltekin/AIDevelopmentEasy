@@ -18,6 +18,35 @@ public class StoryDto
     public DateTime CreatedAt { get; set; }
     public DateTime? LastProcessedAt { get; set; }
     public List<TaskDto> Tasks { get; set; } = new();
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Target Info (Optional) - For bugfixes and modifications
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Target project name within the codebase (e.g., "AIDevelopmentEasy.Api")
+    /// </summary>
+    public string? TargetProject { get; set; }
+
+    /// <summary>
+    /// Target file path relative to codebase (e.g., "Services/UserService.cs")
+    /// </summary>
+    public string? TargetFile { get; set; }
+
+    /// <summary>
+    /// Target class name (e.g., "UserService")
+    /// </summary>
+    public string? TargetClass { get; set; }
+
+    /// <summary>
+    /// Target method name (e.g., "GetById")
+    /// </summary>
+    public string? TargetMethod { get; set; }
+
+    /// <summary>
+    /// Type of change: Create new, Modify existing, or Delete
+    /// </summary>
+    public ChangeType ChangeType { get; set; } = ChangeType.Create;
 }
 
 /// <summary>
@@ -206,6 +235,57 @@ public class CreateStoryRequest
     /// The requirement this story was created from (if any)
     /// </summary>
     public string? RequirementId { get; set; }
+
+    // Target Info (Optional)
+    public string? TargetProject { get; set; }
+    public string? TargetFile { get; set; }
+    public string? TargetClass { get; set; }
+    public string? TargetMethod { get; set; }
+    public ChangeType ChangeType { get; set; } = ChangeType.Create;
+}
+
+/// <summary>
+/// Request to update story target information before starting pipeline
+/// </summary>
+public class UpdateStoryTargetRequest
+{
+    /// <summary>
+    /// Target project name within the codebase
+    /// </summary>
+    public string? TargetProject { get; set; }
+
+    /// <summary>
+    /// Target file path relative to codebase
+    /// </summary>
+    public string? TargetFile { get; set; }
+
+    /// <summary>
+    /// Target class name
+    /// </summary>
+    public string? TargetClass { get; set; }
+
+    /// <summary>
+    /// Target method name
+    /// </summary>
+    public string? TargetMethod { get; set; }
+
+    /// <summary>
+    /// Type of change
+    /// </summary>
+    public ChangeType ChangeType { get; set; } = ChangeType.Create;
+}
+
+/// <summary>
+/// Type of change for a story
+/// </summary>
+public enum ChangeType
+{
+    /// <summary>Create new file/class/method</summary>
+    Create = 0,
+    /// <summary>Modify existing file/class/method</summary>
+    Modify = 1,
+    /// <summary>Delete existing file/class/method</summary>
+    Delete = 2
 }
 
 /// <summary>

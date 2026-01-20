@@ -2,12 +2,16 @@ import type {
   StoryDto, 
   PipelineStatusDto, 
   CreateStoryRequest,
+  UpdateStoryTargetRequest,
   PipelinePhase,
   CodebaseDto,
   CreateCodebaseRequest,
   ProjectSummaryDto,
   RequirementContextDto,
   PipelineContextDto,
+  FileInfoDto,
+  ClassInfoDto,
+  MethodInfoDto,
   RetryInfoDto,
   RetryAction,
   RequirementDto,
@@ -93,6 +97,15 @@ export const storiesApi = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
+    });
+    await handleResponse<void>(response);
+  },
+
+  updateTarget: async (id: string, request: UpdateStoryTargetRequest): Promise<void> => {
+    const response = await fetch(`${API_BASE}/stories/${id}/target`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
     });
     await handleResponse<void>(response);
   }
@@ -220,6 +233,21 @@ export const codebasesApi = {
   getProjects: async (id: string): Promise<ProjectSummaryDto[]> => {
     const response = await fetch(`${API_BASE}/codebases/${id}/projects`);
     return handleResponse<ProjectSummaryDto[]>(response);
+  },
+
+  getProjectFiles: async (codebaseId: string, projectName: string): Promise<FileInfoDto[]> => {
+    const response = await fetch(`${API_BASE}/codebases/${codebaseId}/projects/${encodeURIComponent(projectName)}/files`);
+    return handleResponse<FileInfoDto[]>(response);
+  },
+
+  getProjectClasses: async (codebaseId: string, projectName: string): Promise<ClassInfoDto[]> => {
+    const response = await fetch(`${API_BASE}/codebases/${codebaseId}/projects/${encodeURIComponent(projectName)}/classes`);
+    return handleResponse<ClassInfoDto[]>(response);
+  },
+
+  getClassMethods: async (codebaseId: string, projectName: string, className: string): Promise<MethodInfoDto[]> => {
+    const response = await fetch(`${API_BASE}/codebases/${codebaseId}/projects/${encodeURIComponent(projectName)}/classes/${encodeURIComponent(className)}/methods`);
+    return handleResponse<MethodInfoDto[]>(response);
   },
 
   create: async (request: CreateCodebaseRequest): Promise<CodebaseDto> => {

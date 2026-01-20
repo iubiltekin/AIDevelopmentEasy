@@ -254,6 +254,150 @@ public class CodebasesController : ControllerBase
 
         return Ok(projects);
     }
+
+    /// <summary>
+    /// Get files in a specific project (for target selection dropdowns)
+    /// </summary>
+    [HttpGet("{id}/projects/{projectName}/files")]
+    public async Task<ActionResult<IEnumerable<FileInfoDto>>> GetProjectFiles(string id, string projectName, CancellationToken cancellationToken)
+    {
+        var analysis = await _codebaseRepository.GetAnalysisAsync(id, cancellationToken);
+        if (analysis == null)
+            return NotFound("Analysis not available");
+
+        var project = analysis.Projects.FirstOrDefault(p => 
+            p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
+        
+        if (project == null)
+            return NotFound($"Project '{projectName}' not found");
+
+        // Extract unique files from classes and interfaces
+        var allTypes = project.Classes.Concat(project.Interfaces);
+        var fileGroups = allTypes
+            .Where(t => !string.IsNullOrEmpty(t.FilePath))
+            .GroupBy(t => t.FilePath)
+            .Select(g => new FileInfoDto
+            {
+                Path = g.Key,
+                Name = Path.GetFileName(g.Key),
+                Namespace = g.First().Namespace,
+                ClassCount = g.Count(t => !t.Name.StartsWith("I") || t.BaseTypes.Count > 0), // Rough class detection
+                InterfaceCount = g.Count(t => t.Name.StartsWith("I") && t.BaseTypes.Count == 0)
+            })
+            .OrderBy(f => f.Path);
+
+        return Ok(fileGroups);
+    }
+
+    /// <summary>
+    /// Get classes in a specific project (for target selection dropdowns)
+    /// </summary>
+    [HttpGet("{id}/projects/{projectName}/classes")]
+    public async Task<ActionResult<IEnumerable<ClassInfoDto>>> GetProjectClasses(string id, string projectName, CancellationToken cancellationToken)
+    {
+        var analysis = await _codebaseRepository.GetAnalysisAsync(id, cancellationToken);
+        if (analysis == null)
+            return NotFound("Analysis not available");
+
+        var project = analysis.Projects.FirstOrDefault(p => 
+            p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
+        
+        if (project == null)
+            return NotFound($"Project '{projectName}' not found");
+
+        var classes = project.Classes.Select(c => new ClassInfoDto
+        {
+            Name = c.Name,
+            Namespace = c.Namespace,
+            FilePath = c.FilePath,
+            BaseTypes = c.BaseTypes,
+            Pattern = c.DetectedPattern,
+            Methods = c.Members
+                .Where(m => m.Kind == "Method")
+                .Select(m => m.Name)
+                .ToList()
+        });
+
+        return Ok(classes);
+    }
+
+    /// <summary>
+    /// Get methods of a specific class (for target selection dropdowns)
+    /// </summary>
+    [HttpGet("{id}/projects/{projectName}/classes/{className}/methods")]
+    public async Task<ActionResult<IEnumerable<MethodInfoDto>>> GetClassMethods(
+        string id, string projectName, string className, CancellationToken cancellationToken)
+    {
+        var analysis = await _codebaseRepository.GetAnalysisAsync(id, cancellationToken);
+        if (analysis == null)
+            return NotFound("Analysis not available");
+
+        var project = analysis.Projects.FirstOrDefault(p => 
+            p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
+        
+        if (project == null)
+            return NotFound($"Project '{projectName}' not found");
+
+        var classInfo = project.Classes.FirstOrDefault(c => 
+            c.Name.Equals(className, StringComparison.OrdinalIgnoreCase));
+        
+        if (classInfo == null)
+            return NotFound($"Class '{className}' not found in project '{projectName}'");
+
+        var methods = classInfo.Members
+            .Where(m => m.Kind == "Method")
+            .Select(m => new MethodInfoDto
+            {
+                Name = m.Name,
+                ReturnType = m.ReturnType,
+                Parameters = m.Parameters,
+                IsPublic = m.Modifiers.Contains("public"),
+                IsAsync = m.Modifiers.Contains("async")
+            });
+
+        return Ok(methods);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Target Selection DTOs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// File information for target selection
+/// </summary>
+public class FileInfoDto
+{
+    public string Path { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Namespace { get; set; } = string.Empty;
+    public int ClassCount { get; set; }
+    public int InterfaceCount { get; set; }
+}
+
+/// <summary>
+/// Class information for target selection
+/// </summary>
+public class ClassInfoDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Namespace { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public List<string> BaseTypes { get; set; } = new();
+    public string? Pattern { get; set; }
+    public List<string> Methods { get; set; } = new();
+}
+
+/// <summary>
+/// Method information for target selection
+/// </summary>
+public class MethodInfoDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string ReturnType { get; set; } = string.Empty;
+    public List<string> Parameters { get; set; } = new();
+    public bool IsPublic { get; set; }
+    public bool IsAsync { get; set; }
 }
 
 /// <summary>

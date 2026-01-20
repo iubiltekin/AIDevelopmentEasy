@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save } from 'lucide-react';
-import { StoryDto, StoryStatus, TaskStatus, TaskType, PipelineStatusDto } from '../types';
-import { storiesApi, pipelineApi } from '../services/api';
+import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save, Target, ChevronDown } from 'lucide-react';
+import { StoryDto, StoryStatus, TaskStatus, TaskType, PipelineStatusDto, ChangeType, getChangeTypeLabel, getChangeTypeColor, ProjectSummaryDto, ClassInfoDto, MethodInfoDto } from '../types';
+import { storiesApi, pipelineApi, codebasesApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { PipelineHistorySummary } from '../components/PipelineHistorySummary';
 
@@ -22,6 +22,18 @@ export function StoryDetail() {
   const [historyData, setHistoryData] = useState<PipelineStatusDto | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // Target Info State
+  const [projects, setProjects] = useState<ProjectSummaryDto[]>([]);
+  const [classes, setClasses] = useState<ClassInfoDto[]>([]);
+  const [methods, setMethods] = useState<MethodInfoDto[]>([]);
+  const [targetProject, setTargetProject] = useState<string>('');
+  const [targetFile, setTargetFile] = useState<string>('');
+  const [targetClass, setTargetClass] = useState<string>('');
+  const [targetMethod, setTargetMethod] = useState<string>('');
+  const [changeType, setChangeType] = useState<ChangeType>(ChangeType.Create);
+  const [targetSaving, setTargetSaving] = useState(false);
+  const [targetDirty, setTargetDirty] = useState(false);
+
   useEffect(() => {
     const load = async () => {
       if (!id) return;
@@ -35,6 +47,31 @@ export function StoryDetail() {
 
         setStory(req);
         setContent(reqContent);
+
+        // Load target info from story
+        if (req.targetProject) setTargetProject(req.targetProject);
+        if (req.targetFile) setTargetFile(req.targetFile);
+        if (req.targetClass) setTargetClass(req.targetClass);
+        if (req.targetMethod) setTargetMethod(req.targetMethod);
+        if (req.changeType !== undefined) setChangeType(req.changeType);
+
+        // Load projects if codebase exists
+        if (req.codebaseId) {
+          const projs = await codebasesApi.getProjects(req.codebaseId).catch(() => []);
+          setProjects(projs);
+
+          // Load classes if target project exists
+          if (req.targetProject) {
+            const cls = await codebasesApi.getProjectClasses(req.codebaseId, req.targetProject).catch(() => []);
+            setClasses(cls);
+
+            // Load methods if target class exists
+            if (req.targetClass) {
+              const meths = await codebasesApi.getClassMethods(req.codebaseId, req.targetProject, req.targetClass).catch(() => []);
+              setMethods(meths);
+            }
+          }
+        }
 
         if (req.status === StoryStatus.Completed) {
           const out = await pipelineApi.getOutput(id).catch(() => ({}));
@@ -52,8 +89,90 @@ export function StoryDetail() {
     load();
   }, [id]);
 
+  // Load classes when project changes
+  const handleProjectChange = async (projectName: string) => {
+    setTargetProject(projectName);
+    setTargetFile('');
+    setTargetClass('');
+    setTargetMethod('');
+    setClasses([]);
+    setMethods([]);
+    setTargetDirty(true);
+
+    if (projectName && story?.codebaseId) {
+      const cls = await codebasesApi.getProjectClasses(story.codebaseId, projectName).catch(() => []);
+      setClasses(cls);
+    }
+  };
+
+  // Load methods when class changes
+  const handleClassChange = async (className: string) => {
+    setTargetClass(className);
+    setTargetMethod('');
+    setMethods([]);
+    setTargetDirty(true);
+
+    // Also set the file path from the class
+    const selectedClass = classes.find(c => c.name === className);
+    if (selectedClass) {
+      setTargetFile(selectedClass.filePath);
+    }
+
+    if (className && targetProject && story?.codebaseId) {
+      const meths = await codebasesApi.getClassMethods(story.codebaseId, targetProject, className).catch(() => []);
+      setMethods(meths);
+    }
+  };
+
+  const handleMethodChange = (methodName: string) => {
+    setTargetMethod(methodName);
+    setTargetDirty(true);
+  };
+
+  const handleChangeTypeChange = (type: ChangeType) => {
+    setChangeType(type);
+    setTargetDirty(true);
+  };
+
+  const handleSaveTarget = async () => {
+    if (!id) return;
+    
+    setTargetSaving(true);
+    try {
+      await storiesApi.updateTarget(id, {
+        targetProject: targetProject || undefined,
+        targetFile: targetFile || undefined,
+        targetClass: targetClass || undefined,
+        targetMethod: targetMethod || undefined,
+        changeType
+      });
+      setTargetDirty(false);
+      // Update local story state
+      if (story) {
+        setStory({
+          ...story,
+          targetProject,
+          targetFile,
+          targetClass,
+          targetMethod,
+          changeType
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save target info');
+    } finally {
+      setTargetSaving(false);
+    }
+  };
+
   const handleStart = async () => {
     if (!id) return;
+    
+    // Save target info if dirty before starting
+    if (targetDirty) {
+      await handleSaveTarget();
+    }
+    
     try {
       await pipelineApi.start(id);
       navigate(`/pipeline/${id}`);
@@ -135,6 +254,7 @@ export function StoryDetail() {
   };
 
   const canEditContent = story?.status === StoryStatus.NotStarted;
+  const canEditTarget = story?.status === StoryStatus.NotStarted || story?.status === StoryStatus.Planned;
 
   const getTaskStatusIcon = (status: TaskStatus) => {
     switch (status) {
@@ -241,6 +361,138 @@ export function StoryDetail() {
         </div>
       )}
 
+      {/* Target Info Panel - Show before pipeline starts */}
+      {story.codebaseId && canEditTarget && (
+        <div className="mb-6 bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
+                <Target className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Target Information</h3>
+                <p className="text-sm text-slate-400">Specify where changes should be made (optional)</p>
+              </div>
+            </div>
+            {targetDirty && (
+              <button
+                onClick={handleSaveTarget}
+                disabled={targetSaving}
+                className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+              >
+                {targetSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* Change Type */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Change Type</label>
+              <div className="flex gap-2">
+                {[ChangeType.Create, ChangeType.Modify, ChangeType.Delete].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => handleChangeTypeChange(type)}
+                    className={`flex-1 px-2 py-2 rounded-lg text-sm transition-colors ${
+                      changeType === type
+                        ? `${getChangeTypeColor(type)} text-white`
+                        : 'bg-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {getChangeTypeLabel(type)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Project Dropdown */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Project</label>
+              <div className="relative">
+                <select
+                  value={targetProject}
+                  onChange={(e) => handleProjectChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">Any Project</option>
+                  {projects.filter(p => !p.isTestProject).map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Class Dropdown */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Class</label>
+              <div className="relative">
+                <select
+                  value={targetClass}
+                  onChange={(e) => handleClassChange(e.target.value)}
+                  disabled={!targetProject}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Any Class</option>
+                  {classes.map(c => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Method Dropdown */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Method</label>
+              <div className="relative">
+                <select
+                  value={targetMethod}
+                  onChange={(e) => handleMethodChange(e.target.value)}
+                  disabled={!targetClass}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Any Method</option>
+                  {methods.map(m => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* File Path (auto-filled) */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">File Path</label>
+              <input
+                type="text"
+                value={targetFile}
+                onChange={(e) => { setTargetFile(e.target.value); setTargetDirty(true); }}
+                placeholder="Auto-filled from class"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Selected Target Summary */}
+          {(targetProject || targetClass || targetMethod) && (
+            <div className="mt-4 p-3 bg-slate-900 rounded-lg">
+              <span className="text-sm text-slate-400">Target: </span>
+              <span className="text-sm text-white font-mono">
+                {targetProject || '*'}
+                {targetClass && ` → ${targetClass}`}
+                {targetMethod && `.${targetMethod}()`}
+              </span>
+              <span className={`ml-3 px-2 py-0.5 rounded text-xs ${getChangeTypeColor(changeType)} text-white`}>
+                {getChangeTypeLabel(changeType)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
         {['overview', 'content', 'tasks', 'output'].map(tab => (
@@ -289,6 +541,22 @@ export function StoryDetail() {
                     <dt className="text-sm text-slate-400">Last Processed</dt>
                     <dd className="text-white">
                       {new Date(story.lastProcessedAt!).toLocaleString()}
+                    </dd>
+                  </div>
+                )}
+                {/* Show saved target info */}
+                {(story.targetProject || story.targetClass || story.targetMethod) && (
+                  <div>
+                    <dt className="text-sm text-slate-400">Target</dt>
+                    <dd className="text-white font-mono text-sm">
+                      {story.targetProject || '*'}
+                      {story.targetClass && ` → ${story.targetClass}`}
+                      {story.targetMethod && `.${story.targetMethod}()`}
+                      {story.changeType !== undefined && (
+                        <span className={`ml-2 px-2 py-0.5 rounded text-xs ${getChangeTypeColor(story.changeType)} text-white`}>
+                          {getChangeTypeLabel(story.changeType)}
+                        </span>
+                      )}
                     </dd>
                   </div>
                 )}
@@ -460,13 +728,13 @@ export function StoryDetail() {
               </div>
             ) : (
               <div className="space-y-4">
-                {Object.entries(output).map(([filename, content]) => (
+                {Object.entries(output).map(([filename, fileContent]) => (
                   <div key={filename} className="border border-slate-700 rounded-lg overflow-hidden">
                     <div className="px-4 py-2 bg-slate-700 text-white font-mono text-sm">
                       {filename}
                     </div>
                     <pre className="p-4 bg-slate-900 overflow-x-auto text-sm text-slate-300">
-                      {content}
+                      {fileContent}
                     </pre>
                   </div>
                 ))}

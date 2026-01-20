@@ -245,6 +245,86 @@ public class FileSystemStoryRepository : IStoryRepository
         return Task.FromResult(FindLegacyStoryFile(id) != null);
     }
 
+    public async Task<StoryDto> CreateAsync(CreateStoryRequest request, CancellationToken cancellationToken = default)
+    {
+        // Generate unique ID
+        var id = GenerateId();
+
+        var storyData = new StoryData
+        {
+            Id = id,
+            Name = request.Name,
+            Content = request.Content,
+            Type = request.Type,
+            CodebaseId = request.CodebaseId,
+            RequirementId = request.RequirementId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            // Target Info
+            TargetProject = request.TargetProject,
+            TargetFile = request.TargetFile,
+            TargetClass = request.TargetClass,
+            TargetMethod = request.TargetMethod,
+            ChangeType = request.ChangeType
+        };
+
+        await SaveStoryDataAsync(storyData, cancellationToken);
+
+        _logger.LogInformation("Created story: {Id} - {Name} (target: {Project}/{File})", 
+            id, request.Name, request.TargetProject ?? "none", request.TargetFile ?? "none");
+
+        return new StoryDto
+        {
+            Id = id,
+            Name = request.Name,
+            Content = request.Content,
+            Type = request.Type,
+            Status = StoryStatus.NotStarted,
+            CodebaseId = request.CodebaseId,
+            RequirementId = request.RequirementId,
+            CreatedAt = storyData.CreatedAt,
+            TargetProject = request.TargetProject,
+            TargetFile = request.TargetFile,
+            TargetClass = request.TargetClass,
+            TargetMethod = request.TargetMethod,
+            ChangeType = request.ChangeType
+        };
+    }
+
+    public async Task<bool> UpdateTargetAsync(string id, UpdateStoryTargetRequest request, CancellationToken cancellationToken = default)
+    {
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (!File.Exists(jsonPath))
+        {
+            _logger.LogWarning("Story not found for target update: {Id}", id);
+            return false;
+        }
+
+        var storyData = await LoadStoryDataAsync(jsonPath, cancellationToken);
+        if (storyData == null)
+            return false;
+
+        // Update target fields
+        storyData.TargetProject = request.TargetProject;
+        storyData.TargetFile = request.TargetFile;
+        storyData.TargetClass = request.TargetClass;
+        storyData.TargetMethod = request.TargetMethod;
+        storyData.ChangeType = request.ChangeType;
+        storyData.UpdatedAt = DateTime.UtcNow;
+
+        await SaveStoryDataAsync(storyData, cancellationToken);
+
+        _logger.LogInformation("Updated story target: {Id} → {Project}/{File}/{Class}.{Method} ({ChangeType})", 
+            id, 
+            request.TargetProject ?? "any", 
+            request.TargetFile ?? "any", 
+            request.TargetClass ?? "any",
+            request.TargetMethod ?? "any",
+            request.ChangeType);
+
+        return true;
+    }
+
     #region Private Methods
 
     private string GenerateId()
@@ -298,7 +378,13 @@ public class FileSystemStoryRepository : IStoryRepository
                 RequirementId = data.RequirementId,
                 CreatedAt = data.CreatedAt,
                 LastProcessedAt = data.UpdatedAt,
-                Tasks = tasks.ToList()
+                Tasks = tasks.ToList(),
+                // Target Info
+                TargetProject = data.TargetProject,
+                TargetFile = data.TargetFile,
+                TargetClass = data.TargetClass,
+                TargetMethod = data.TargetMethod,
+                ChangeType = data.ChangeType
             };
         }
         catch (Exception ex)
@@ -427,6 +513,13 @@ public class FileSystemStoryRepository : IStoryRepository
         public string? RequirementId { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+
+        // Target Info (Optional)
+        public string? TargetProject { get; set; }
+        public string? TargetFile { get; set; }
+        public string? TargetClass { get; set; }
+        public string? TargetMethod { get; set; }
+        public ChangeType ChangeType { get; set; } = ChangeType.Create;
     }
 
     /// <summary>

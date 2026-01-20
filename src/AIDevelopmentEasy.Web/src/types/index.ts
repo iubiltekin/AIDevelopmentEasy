@@ -78,6 +78,26 @@ export interface StoryDto {
   createdAt: string;
   lastProcessedAt?: string;
   tasks: TaskDto[];
+  // Target Info (Optional) - For bugfixes and modifications
+  targetProject?: string;
+  targetFile?: string;
+  targetClass?: string;
+  targetMethod?: string;
+  changeType?: ChangeType;
+}
+
+export enum ChangeType {
+  Create = 0,
+  Modify = 1,
+  Delete = 2
+}
+
+export interface UpdateStoryTargetRequest {
+  targetProject?: string;
+  targetFile?: string;
+  targetClass?: string;
+  targetMethod?: string;
+  changeType?: ChangeType;
 }
 
 export interface PhaseStatusDto {
@@ -183,6 +203,61 @@ export interface CreateStoryRequest {
   content: string;
   type?: StoryType;  // Optional, defaults to Single
   codebaseId?: string;
+  requirementId?: string;
+  // Target Info (Optional)
+  targetProject?: string;
+  targetFile?: string;
+  targetClass?: string;
+  targetMethod?: string;
+  changeType?: ChangeType;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Target Selection Types (for dropdowns)
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface FileInfoDto {
+  path: string;
+  name: string;
+  namespace: string;
+  classCount: number;
+  interfaceCount: number;
+}
+
+export interface ClassInfoDto {
+  name: string;
+  namespace: string;
+  filePath: string;
+  baseTypes: string[];
+  pattern?: string;
+  methods: string[];
+}
+
+export interface MethodInfoDto {
+  name: string;
+  returnType: string;
+  parameters: string[];
+  isPublic: boolean;
+  isAsync: boolean;
+}
+
+// Helper functions
+export function getChangeTypeLabel(type: ChangeType): string {
+  const labels: Record<ChangeType, string> = {
+    [ChangeType.Create]: 'Create New',
+    [ChangeType.Modify]: 'Modify Existing',
+    [ChangeType.Delete]: 'Delete'
+  };
+  return labels[type] ?? 'Unknown';
+}
+
+export function getChangeTypeColor(type: ChangeType): string {
+  const colors: Record<ChangeType, string> = {
+    [ChangeType.Create]: 'bg-green-600',
+    [ChangeType.Modify]: 'bg-amber-600',
+    [ChangeType.Delete]: 'bg-red-600'
+  };
+  return colors[type] ?? 'bg-slate-600';
 }
 
 // ════════════════════════════════════════════════════════════════════════════
