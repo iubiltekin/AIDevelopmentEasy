@@ -343,13 +343,61 @@ public class PipelineService : IPipelineService
                     await _notificationService.NotifyProgressAsync(storyId,
                         $"Codebase loaded: {summary.TotalProjects} projects, {summary.TotalClasses} classes");
 
-                    // Try to extract target class from story
-                    var targetClassName = ExtractTargetClassName(content);
+                    // Use target class from story if provided, otherwise try to extract from content
+                    var targetClassName = !string.IsNullOrEmpty(story.TargetClass) 
+                        ? story.TargetClass 
+                        : ExtractTargetClassName(content);
 
-                    if (!string.IsNullOrEmpty(targetClassName))
+                    // Read target file content from disk if specified
+                    string? targetFileContent = null;
+                    string? targetMethodContent = null;
+                    if (!string.IsNullOrEmpty(story.TargetFile) && !string.IsNullOrEmpty(codebaseAnalysis.CodebasePath))
                     {
+                        var fullPath = Path.Combine(codebaseAnalysis.CodebasePath, story.TargetFile);
+                        if (File.Exists(fullPath))
+                        {
+                            targetFileContent = await File.ReadAllTextAsync(fullPath, ct);
+                            await _notificationService.NotifyProgressAsync(storyId,
+                                $"Read target file: {story.TargetFile} ({targetFileContent.Length} chars)");
+
+                            // Extract specific method if specified
+                            if (!string.IsNullOrEmpty(story.TargetMethod))
+                            {
+                                targetMethodContent = ExtractMethodContent(targetFileContent, story.TargetMethod);
+                                if (!string.IsNullOrEmpty(targetMethodContent))
+                                {
+                                    await _notificationService.NotifyProgressAsync(storyId,
+                                        $"Extracted target method: {story.TargetMethod}");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("[Analysis] Target file not found: {Path}", fullPath);
+                        }
+                    }
+
+                    // Read test file content if specified
+                    string? targetTestFileContent = null;
+                    if (!string.IsNullOrEmpty(story.TargetTestFile) && !string.IsNullOrEmpty(codebaseAnalysis.CodebasePath))
+                    {
+                        var fullTestPath = Path.Combine(codebaseAnalysis.CodebasePath, story.TargetTestFile);
+                        if (File.Exists(fullTestPath))
+                        {
+                            targetTestFileContent = await File.ReadAllTextAsync(fullTestPath, ct);
+                            await _notificationService.NotifyProgressAsync(storyId,
+                                $"Read target test file: {story.TargetTestFile} ({targetTestFileContent.Length} chars)");
+                        }
+                    }
+
+                    // Only search for class if NOT using targeted modification (file/class already specified)
+                    var hasExplicitTarget = !string.IsNullOrEmpty(story.TargetFile) && !string.IsNullOrEmpty(story.TargetClass);
+                    
+                    if (!string.IsNullOrEmpty(targetClassName) && !hasExplicitTarget)
+                    {
+                        // No explicit target - try to find class in codebase
                         await _notificationService.NotifyProgressAsync(storyId,
-                            $"Detected target class: {targetClassName}, finding references...");
+                            $"Searching for class: {targetClassName}...");
 
                         classResult = await _codeAnalysisAgent.FindClassAsync(codebaseAnalysis, targetClassName, includeContent: true);
 
@@ -369,6 +417,31 @@ public class PipelineService : IPipelineService
                                 $"Class '{targetClassName}' not found, will create new code");
                         }
                     }
+                    else if (hasExplicitTarget)
+                    {
+                        // Explicit target specified - use it directly, no need to search
+                        await _notificationService.NotifyProgressAsync(storyId,
+                            $"Using explicit target: {story.TargetClass} in {story.TargetFile}");
+                        
+                        _logger.LogInformation("[Analysis] Explicit target: {Project}/{File}/{Class}.{Method}",
+                            story.TargetProject, story.TargetFile, story.TargetClass, story.TargetMethod);
+                    }
+
+                    // Store target info in execution for later use
+                    execution.TargetInfo = new TargetInfo
+                    {
+                        Project = story.TargetProject,
+                        File = story.TargetFile,
+                        Class = story.TargetClass,
+                        Method = story.TargetMethod,
+                        ChangeType = story.ChangeType,
+                        FileContent = targetFileContent,
+                        MethodContent = targetMethodContent,
+                        TestProject = story.TargetTestProject,
+                        TestFile = story.TargetTestFile,
+                        TestClass = story.TargetTestClass,
+                        TestFileContent = targetTestFileContent
+                    };
 
                     return new
                     {
@@ -379,10 +452,15 @@ public class PipelineService : IPipelineService
                         TotalInterfaces = summary.TotalInterfaces,
                         Patterns = summary.DetectedPatterns,
                         TargetClass = targetClassName,
+                        TargetFile = story.TargetFile,
+                        TargetMethod = story.TargetMethod,
+                        ChangeType = story.ChangeType.ToString(),
                         ClassFound = classResult?.Found ?? false,
                         ClassFilePath = classResult?.FullPath,
                         ReferenceCount = referenceResult?.References.Count ?? 0,
-                        AffectedFiles = referenceResult?.AffectedFiles ?? new List<string>()
+                        AffectedFiles = referenceResult?.AffectedFiles ?? new List<string>(),
+                        HasTargetFileContent = targetFileContent != null,
+                        HasTestFileContent = targetTestFileContent != null
                     };
                 }, ct);
 
@@ -412,7 +490,20 @@ public class PipelineService : IPipelineService
                 {
                     _logger.LogInformation("[Planning] Using codebase-aware planning for: {CodebaseId}", story?.CodebaseId);
 
-                    if (classResult?.Found == true && referenceResult != null)
+                    // Check if we have targeted modification info
+                    if (execution.TargetInfo?.HasCodeTarget == true)
+                    {
+                        // TARGETED PLANNING: User specified exact file/class/method to modify
+                        await _notificationService.NotifyProgressAsync(storyId,
+                            $"Creating targeted modification plan for: {execution.TargetInfo.Class ?? execution.TargetInfo.File}");
+
+                        response = await PlanTargetedModificationAsync(
+                            content, execution.TargetInfo, codebaseAnalysis, ct);
+
+                        await _notificationService.NotifyProgressAsync(storyId,
+                            "Targeted modification plan created - will modify specific file(s) only");
+                    }
+                    else if (classResult?.Found == true && referenceResult != null)
                     {
                         // Modification planning with class/reference context
                         await _notificationService.NotifyProgressAsync(storyId,
@@ -612,12 +703,15 @@ public class PipelineService : IPipelineService
             }
 
             // Phase 4: Debugging (DebuggerAgent - verify and fix code)
+            // IMPORTANT: For targeted method modifications, we compile with dummy wrappers
+            // The actual codebase is NOT modified until Deployment phase
             var debugResult = await ExecutePhaseAsync(execution, PipelinePhase.Debugging, async () =>
             {
                 await _notificationService.NotifyPhaseStartedAsync(storyId, PipelinePhase.Debugging,
                     "DebuggerAgent verifying and fixing code...");
 
                 var files = await _outputRepository.GetGeneratedFilesAsync(storyId, ct);
+                var tasks = await _taskRepository.GetByStoryAsync(storyId, ct);
 
                 if (files.Count == 0)
                 {
@@ -630,11 +724,54 @@ public class PipelineService : IPipelineService
                     };
                 }
 
-                await _notificationService.NotifyProgressAsync(storyId, $"Building {files.Count} files together...");
+                // For targeted method modifications, create dummy wrappers for compilation
+                var filesToDebug = new Dictionary<string, string>();
+                
+                foreach (var file in files)
+                {
+                    // Find the task for this file
+                    var matchingTask = tasks.FirstOrDefault(t => 
+                        t.TargetFiles.Any(tf => file.Key.EndsWith(tf, StringComparison.OrdinalIgnoreCase) ||
+                                                tf.EndsWith(Path.GetFileName(file.Key), StringComparison.OrdinalIgnoreCase)));
+
+                    // If this is a method-only modification, wrap it in a dummy class
+                    if (matchingTask?.IsModification == true && 
+                        !string.IsNullOrEmpty(matchingTask.TargetMethod) &&
+                        !string.IsNullOrEmpty(matchingTask.CurrentContent))
+                    {
+                        var className = execution.TargetInfo?.Class ?? 
+                                        Path.GetFileNameWithoutExtension(file.Key);
+                        var namespaceName = matchingTask.Namespace ?? 
+                                            ExtractNamespaceFromFile(matchingTask.CurrentContent) ?? 
+                                            "TargetedModification";
+
+                        // Create dummy wrapper for compile verification
+                        var wrappedCode = CreateDummyWrapperForMethod(
+                            file.Value, 
+                            className, 
+                            namespaceName, 
+                            matchingTask.CurrentContent);
+
+                        filesToDebug[file.Key] = wrappedCode;
+                        
+                        await _notificationService.NotifyProgressAsync(storyId, 
+                            $"[Method-Only] Wrapping {matchingTask.TargetMethod}() in dummy class for compile check");
+                        
+                        _logger.LogInformation("[Debugging] Created dummy wrapper for method: {Method} in {File}",
+                            matchingTask.TargetMethod, file.Key);
+                    }
+                    else
+                    {
+                        // Full file - use as is
+                        filesToDebug[file.Key] = file.Value;
+                    }
+                }
+
+                await _notificationService.NotifyProgressAsync(storyId, $"Building {filesToDebug.Count} files together...");
 
                 // Use multi-file debugging - compile all files together in a single project
                 // This allows test files to reference their implementation files
-                var debugResponse = await _debuggerAgent.DebugMultipleFilesAsync(files, ct);
+                var debugResponse = await _debuggerAgent.DebugMultipleFilesAsync(filesToDebug, ct);
 
                 ct.ThrowIfCancellationRequested();
 
@@ -754,8 +891,64 @@ public class PipelineService : IPipelineService
 
                     await _notificationService.NotifyProgressAsync(storyId, $"Deploying {files.Count} files...");
 
+                    // Get task metadata for modification info
+                    var savedTasks = await _taskRepository.GetByStoryAsync(storyId, ct);
+                    
+                    // Build deployment files with modification metadata
+                    var deploymentFiles = new List<DeploymentFile>();
+                    foreach (var file in files)
+                    {
+                        var deployFile = new DeploymentFile
+                        {
+                            RelativePath = file.Key,
+                            Content = file.Value,
+                            IsModification = false
+                        };
+
+                        // Find matching task to get modification info
+                        var matchingTask = savedTasks.FirstOrDefault(t => 
+                            t.TargetFiles.Any(tf => file.Key.EndsWith(tf, StringComparison.OrdinalIgnoreCase) ||
+                                                    tf.EndsWith(Path.GetFileName(file.Key), StringComparison.OrdinalIgnoreCase)));
+                        
+                        if (matchingTask?.IsModification == true)
+                        {
+                            deployFile.IsModification = true;
+                            
+                            // Extract target method from task description or target info
+                            if (execution.TargetInfo != null && !string.IsNullOrEmpty(execution.TargetInfo.Method))
+                            {
+                                deployFile.TargetMethodName = execution.TargetInfo.Method;
+                                deployFile.TargetClassName = execution.TargetInfo.Class;
+                            }
+                            
+                            _logger.LogInformation("[Deployment] File marked as modification: {File}, Method: {Method}",
+                                file.Key, deployFile.TargetMethodName ?? "N/A");
+                        }
+
+                        // Check if this is a test file that needs namespace conversion
+                        var isTestFile = file.Key.Contains("Test", StringComparison.OrdinalIgnoreCase) ||
+                                         matchingTask?.ProjectName?.Contains("Test", StringComparison.OrdinalIgnoreCase) == true;
+                        
+                        if (isTestFile && execution.TargetInfo != null)
+                        {
+                            deployFile.IsTestFile = true;
+                            
+                            // Get the real namespace from the target class file
+                            if (!string.IsNullOrEmpty(execution.TargetInfo.FileContent))
+                            {
+                                deployFile.RealClassNamespace = ExtractNamespaceFromFile(execution.TargetInfo.FileContent);
+                            }
+                            deployFile.RealClassName = execution.TargetInfo.Class;
+                            
+                            _logger.LogInformation("[Deployment] Test file will use real namespace: {NS} for class {Class}",
+                                deployFile.RealClassNamespace ?? "N/A", deployFile.RealClassName ?? "N/A");
+                        }
+
+                        deploymentFiles.Add(deployFile);
+                    }
+
                     // Deploy files to codebase using full analysis for accurate project paths
-                    var deploymentResult = await _deploymentAgent.DeployAsync(codebaseAnalysis, files, ct);
+                    var deploymentResult = await _deploymentAgent.DeployAsync(codebaseAnalysis, deploymentFiles, ct);
 
                     // Store for potential rollback
                     lastDeploymentResult = deploymentResult;
@@ -1100,7 +1293,9 @@ public class PipelineService : IPipelineService
                         UsesExisting = st.UsesExisting,
                         IsModification = st.IsModification,
                         FullPath = st.FullPath ?? matchingModTask?.FullPath,
-                        Namespace = st.Namespace
+                        Namespace = st.Namespace,
+                        TargetMethod = st.TargetMethod,
+                        CurrentContent = st.CurrentContent
                     });
                 }
                 projectOrder++;
@@ -1130,6 +1325,33 @@ public class PipelineService : IPipelineService
         // Deployment state for retry
         public DeploymentResult? LastDeploymentResult { get; set; }
         public Dictionary<string, string>? GeneratedFiles { get; set; }
+
+        // Target info from story (for limiting scope)
+        public TargetInfo? TargetInfo { get; set; }
+    }
+
+    /// <summary>
+    /// Target information from story - limits pipeline scope to specific files/methods
+    /// </summary>
+    private class TargetInfo
+    {
+        // Code target
+        public string? Project { get; set; }
+        public string? File { get; set; }
+        public string? Class { get; set; }
+        public string? Method { get; set; }
+        public ChangeType ChangeType { get; set; }
+        public string? FileContent { get; set; }
+        public string? MethodContent { get; set; }
+
+        // Test target
+        public string? TestProject { get; set; }
+        public string? TestFile { get; set; }
+        public string? TestClass { get; set; }
+        public string? TestFileContent { get; set; }
+
+        public bool HasCodeTarget => !string.IsNullOrEmpty(File) || !string.IsNullOrEmpty(Class);
+        public bool HasTestTarget => !string.IsNullOrEmpty(TestFile) || !string.IsNullOrEmpty(TestClass);
     }
 
     private class PhaseResult
@@ -1264,6 +1486,435 @@ public class PipelineService : IPipelineService
 
         _logger.LogInformation("[ExtractClassName] No class name detected in story");
         return null;
+    }
+
+    /// <summary>
+    /// Extract a specific method's content from a C# file
+    /// </summary>
+    private string? ExtractMethodContent(string fileContent, string methodName)
+    {
+        if (string.IsNullOrEmpty(fileContent) || string.IsNullOrEmpty(methodName))
+            return null;
+
+        // Pattern to find method with its body (handles async, public/private, return types, etc.)
+        var pattern = $@"((?:public|private|protected|internal|static|async|override|virtual|\s)+[\w<>\[\],\s\?]+\s+{System.Text.RegularExpressions.Regex.Escape(methodName)}\s*(?:<[^>]+>)?\s*\([^)]*\)\s*(?:where[^{{]+)?\s*\{{)";
+        
+        var match = System.Text.RegularExpressions.Regex.Match(fileContent, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
+        
+        if (!match.Success)
+        {
+            _logger.LogWarning("[ExtractMethod] Method {MethodName} not found in file", methodName);
+            return null;
+        }
+
+        // Find the matching closing brace
+        var startIndex = match.Index;
+        var braceCount = 0;
+        var endIndex = startIndex;
+        var inString = false;
+        var inChar = false;
+        var escaped = false;
+
+        for (var i = match.Index + match.Length - 1; i < fileContent.Length; i++)
+        {
+            var c = fileContent[i];
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"' && !inChar) inString = !inString;
+            if (c == '\'' && !inString) inChar = !inChar;
+
+            if (!inString && !inChar)
+            {
+                if (c == '{') braceCount++;
+                if (c == '}')
+                {
+                    braceCount--;
+                    if (braceCount == 0)
+                    {
+                        endIndex = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (endIndex > startIndex)
+        {
+            var methodContent = fileContent.Substring(startIndex, endIndex - startIndex);
+            _logger.LogInformation("[ExtractMethod] Extracted method {MethodName} ({Length} chars)", methodName, methodContent.Length);
+            return methodContent;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Create a targeted modification plan when user specified exact file/class/method
+    /// This bypasses the LLM planning and creates a direct modification task
+    /// </summary>
+    private async Task<AgentResponse> PlanTargetedModificationAsync(
+        string requirement,
+        TargetInfo targetInfo,
+        Core.Models.CodebaseAnalysis codebaseAnalysis,
+        CancellationToken ct)
+    {
+        _logger.LogInformation("[Planning] Creating targeted modification plan for: {Project}/{File}/{Class}.{Method}",
+            targetInfo.Project, targetInfo.File, targetInfo.Class, targetInfo.Method);
+
+        var tasks = new List<SubTask>();
+        var taskIndex = 1;
+
+        // Task 1: Main code modification (if target file specified)
+        if (!string.IsNullOrEmpty(targetInfo.File))
+        {
+            var changeTypeDesc = targetInfo.ChangeType switch
+            {
+                ChangeType.Create => "Create new code in",
+                ChangeType.Modify => "Modify existing code in",
+                ChangeType.Delete => "Delete code from",
+                _ => "Modify"
+            };
+
+            string description;
+            
+            // If specific method is targeted, only generate the method body (not full file)
+            if (!string.IsNullOrEmpty(targetInfo.Method))
+            {
+                description = $@"# Modify method `{targetInfo.Method}()` in `{targetInfo.Class}`
+
+**Target Class:** {targetInfo.Class}
+**Target Method:** {targetInfo.Method}
+**Change Type:** {targetInfo.ChangeType}
+
+## REQUIREMENT
+{requirement}
+
+## CURRENT METHOD IMPLEMENTATION
+```csharp
+{targetInfo.MethodContent ?? "// Method content not found"}
+```
+
+## OUTPUT INSTRUCTIONS - CRITICAL!
+Output ONLY the modified method - NOT the entire file!
+
+Your output must be ONLY the method like this:
+```csharp
+/// <summary>
+/// XML documentation for the method
+/// </summary>
+public {GetMethodSignatureFromContent(targetInfo.MethodContent, targetInfo.Method)}
+{{
+    // Your modified implementation here
+}}
+```
+
+DO NOT output:
+- using statements
+- namespace declaration
+- class declaration
+- other methods
+- ANY code outside the single method
+
+ONLY output the complete method with its signature and body.";
+
+                tasks.Add(new SubTask
+                {
+                    Index = taskIndex++,
+                    Title = $"Modify {targetInfo.Class}.{targetInfo.Method}()",
+                    Description = description,
+                    TargetFiles = new List<string> { targetInfo.File },
+                    ProjectName = targetInfo.Project,
+                    Namespace = ExtractNamespaceFromFile(targetInfo.FileContent),
+                    IsModification = true,
+                    TargetMethod = targetInfo.Method,
+                    CurrentContent = targetInfo.FileContent,  // Store original file for merge
+                    DependsOn = new List<int>()
+                });
+            }
+            else
+            {
+                // Full file modification (no specific method)
+                var fileContentSection = "";
+                if (!string.IsNullOrEmpty(targetInfo.FileContent))
+                {
+                    fileContentSection = $@"
+
+## CURRENT FILE CONTENT
+```csharp
+{targetInfo.FileContent}
+```";
+                }
+
+                description = $@"# {changeTypeDesc} `{targetInfo.File}`
+
+**Target Class:** {targetInfo.Class ?? "See file content"}
+**Change Type:** {targetInfo.ChangeType}
+
+## REQUIREMENT
+{requirement}
+{fileContentSection}
+
+## INSTRUCTIONS
+Output the COMPLETE modified file with all changes applied.";
+
+                tasks.Add(new SubTask
+                {
+                    Index = taskIndex++,
+                    Title = $"Modify {targetInfo.Class ?? Path.GetFileNameWithoutExtension(targetInfo.File)}",
+                    Description = description,
+                    TargetFiles = new List<string> { targetInfo.File },
+                    ProjectName = targetInfo.Project,
+                    Namespace = ExtractNamespaceFromFile(targetInfo.FileContent),
+                    IsModification = true,
+                    CurrentContent = targetInfo.FileContent,
+                    DependsOn = new List<int>()
+                });
+            }
+        }
+
+        // Task 2: Unit test - either modify existing or create new
+        if (!string.IsNullOrEmpty(targetInfo.TestProject))
+        {
+            // If TestClass is specified → modify existing test file
+            // If TestClass is NOT specified → create new test class
+            var hasExistingTestClass = !string.IsNullOrEmpty(targetInfo.TestClass) && !string.IsNullOrEmpty(targetInfo.TestFile);
+
+            if (hasExistingTestClass)
+            {
+                // MODIFY existing test class - add tests for the TARGET METHOD ONLY
+                var targetMethodInfo = !string.IsNullOrEmpty(targetInfo.Method)
+                    ? $"**Target Method Being Tested:** `{targetInfo.Method}`"
+                    : "**Target:** All changes in the previous task";
+
+                var testDescription = $@"Update or add tests in the existing test file `{targetInfo.TestFile}`.
+
+**Target Test Class:** {targetInfo.TestClass}
+{targetMethodInfo}
+
+**REQUIREMENT:**
+Add unit tests ONLY for the method/changes specified above. Do NOT write tests for other methods.
+
+**Current Test File Content:**
+```csharp
+{targetInfo.TestFileContent ?? "// Test file content will be provided"}
+```
+
+**CRITICAL INSTRUCTIONS:**
+- Add new test methods ONLY for `{targetInfo.Method ?? "the modified code"}`
+- Do NOT create tests for unrelated methods in the class
+- Do NOT create a new test class
+- Do NOT create a new test file
+- Keep ALL existing tests intact (do not modify or delete them)
+- Follow the existing test naming convention
+- Test method naming: {targetInfo.Method ?? "MethodName"}_Scenario_ExpectedResult
+- Output the COMPLETE modified test file";
+
+                tasks.Add(new SubTask
+                {
+                    Index = taskIndex++,
+                    Title = $"Add tests for {targetInfo.Method ?? "modified code"} in {targetInfo.TestClass}",
+                    Description = testDescription,
+                    TargetFiles = new List<string> { targetInfo.TestFile! },
+                    ProjectName = targetInfo.TestProject,
+                    Namespace = ExtractNamespaceFromFile(targetInfo.TestFileContent),
+                    IsModification = true,
+                    TargetMethod = targetInfo.Method,  // Track which method is being tested
+                    DependsOn = new List<int> { 1 }
+                });
+            }
+            else
+            {
+                // CREATE new test class - but ONLY for the target method
+                var targetClassName = targetInfo.Class ?? "Target";
+                var targetMethodName = targetInfo.Method;
+                
+                // If we have a specific method, create a focused test class
+                var newTestClassName = !string.IsNullOrEmpty(targetMethodName)
+                    ? $"{targetClassName}_{targetMethodName}Tests"  // e.g., FileLogger_CreateLogSourceTests
+                    : $"{targetClassName}Tests";
+                var testFileName = $"{newTestClassName}.cs";
+                
+                // Determine test file path based on code file structure
+                var testFilePath = !string.IsNullOrEmpty(targetInfo.File) 
+                    ? Path.Combine(Path.GetDirectoryName(targetInfo.File) ?? "", testFileName)
+                    : testFileName;
+
+                var targetMethodInfo = !string.IsNullOrEmpty(targetMethodName)
+                    ? $@"**IMPORTANT: This test class is ONLY for the `{targetMethodName}` method.**
+
+**Target Method:** `{targetMethodName}`"
+                    : "**Target:** All changes in the previous task";
+
+                var testDescription = $@"Create a NEW unit test class for `{targetClassName}`.
+
+**New Test Class Name:** {newTestClassName}
+**Test File:** {testFilePath}
+**Test Project:** {targetInfo.TestProject}
+
+{targetMethodInfo}
+
+**REQUIREMENT:**
+Write unit tests ONLY for the `{targetMethodName ?? "modified method"}`. Do NOT test other methods in the class.
+
+**Target Code Being Tested:**
+- Class: {targetInfo.Class ?? "See previous task"}
+- Method: {targetMethodName ?? "Modified method only"}
+- Project: {targetInfo.Project ?? "See previous task"}
+
+**INSTRUCTIONS:**
+- Create a NEW test class named `{newTestClassName}`
+- Write tests ONLY for `{targetMethodName ?? "the modified method"}`, not other methods
+- Use NUnit framework with [TestFixture] and [Test] attributes
+- Use FluentAssertions for assertions
+- Follow Arrange-Act-Assert pattern
+- Test method naming: {targetMethodName ?? "MethodName"}_Scenario_ExpectedResult
+- Include tests for:
+  - Normal/happy path scenarios
+  - Edge cases (null inputs, boundary values)
+  - Error conditions (if applicable)
+- Add XML documentation for the test class
+- Keep the test class focused and minimal";
+
+                tasks.Add(new SubTask
+                {
+                    Index = taskIndex++,
+                    Title = $"Create unit tests for {targetMethodName ?? targetClassName}",
+                    Description = testDescription,
+                    TargetFiles = new List<string> { testFilePath },
+                    ProjectName = targetInfo.TestProject,
+                    Namespace = $"{targetInfo.TestProject}",  // Will be adjusted by coder
+                    IsModification = false,  // This is a CREATE, not modification
+                    TargetMethod = targetMethodName,  // Track which method is being tested
+                    DependsOn = new List<int> { 1 }
+                });
+            }
+        }
+
+        _logger.LogInformation("[Planning] Created {Count} targeted modification task(s)", tasks.Count);
+
+        return await Task.FromResult(new AgentResponse
+        {
+            Success = true,
+            Output = $"Targeted modification plan: {tasks.Count} task(s)",
+            Data = new Dictionary<string, object>
+            {
+                ["project_name"] = targetInfo.Project ?? "Modification",
+                ["summary"] = $"Targeted modification of {targetInfo.Class ?? targetInfo.File}",
+                ["tasks"] = tasks,
+                ["is_targeted_modification"] = true
+            },
+            TokensUsed = 0  // No LLM call needed
+        });
+    }
+
+    /// <summary>
+    /// Extract namespace from file content
+    /// </summary>
+    private string? ExtractNamespaceFromFile(string? fileContent)
+    {
+        if (string.IsNullOrEmpty(fileContent))
+            return null;
+
+        var match = System.Text.RegularExpressions.Regex.Match(fileContent, @"namespace\s+([\w.]+)");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Extract method signature hint from method content for LLM guidance
+    /// </summary>
+    private static string GetMethodSignatureFromContent(string? methodContent, string methodName)
+    {
+        if (string.IsNullOrEmpty(methodContent))
+            return $"void {methodName}()";
+
+        // Try to extract signature from method content
+        var signatureMatch = System.Text.RegularExpressions.Regex.Match(
+            methodContent, 
+            @"((?:public|private|protected|internal|static|virtual|override|async|sealed|new|\s)+[\w<>\[\],\?\s]+\s+" + 
+            System.Text.RegularExpressions.Regex.Escape(methodName) + @"\s*(?:<[^>]+>)?\s*\([^)]*\))",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        if (signatureMatch.Success)
+        {
+            var signature = signatureMatch.Groups[1].Value.Trim();
+            // Remove access modifiers for cleaner output hint
+            return System.Text.RegularExpressions.Regex.Replace(signature, @"^(public|private|protected|internal)\s+", "");
+        }
+
+        return $"void {methodName}()";
+    }
+
+    /// <summary>
+    /// Create a dummy wrapper class for compiling a standalone method during debugging.
+    /// This allows verifying the method compiles without modifying the actual codebase.
+    /// </summary>
+    private string CreateDummyWrapperForMethod(string methodCode, string className, string namespaceName, string? originalFileContent)
+    {
+        // Extract using statements from original file
+        var usings = new List<string> { "using System;", "using System.Collections.Generic;", "using System.Linq;", "using System.Threading.Tasks;" };
+        
+        if (!string.IsNullOrEmpty(originalFileContent))
+        {
+            var usingMatches = System.Text.RegularExpressions.Regex.Matches(originalFileContent, @"^using\s+[^;]+;", System.Text.RegularExpressions.RegexOptions.Multiline);
+            foreach (System.Text.RegularExpressions.Match match in usingMatches)
+            {
+                if (!usings.Contains(match.Value))
+                    usings.Add(match.Value);
+            }
+        }
+
+        // Extract field dependencies from original class (simple heuristic)
+        var fields = "";
+        if (!string.IsNullOrEmpty(originalFileContent))
+        {
+            var fieldMatches = System.Text.RegularExpressions.Regex.Matches(
+                originalFileContent, 
+                @"^\s*(private|protected|internal|public)?\s*(readonly\s+)?(static\s+)?[\w<>\[\],\?\s]+\s+_?\w+\s*(=|;)",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+            
+            foreach (System.Text.RegularExpressions.Match match in fieldMatches)
+            {
+                // Convert to simple placeholder fields
+                var fieldLine = match.Value.Trim();
+                if (fieldLine.Contains("="))
+                    fieldLine = fieldLine.Substring(0, fieldLine.IndexOf("=")) + " = default!;";
+                else if (!fieldLine.EndsWith(";"))
+                    fieldLine += ";";
+                    
+                fields += "        " + fieldLine + "\n";
+            }
+        }
+
+        return $@"{string.Join("\n", usings)}
+
+namespace {namespaceName}
+{{
+    /// <summary>
+    /// DUMMY WRAPPER CLASS for compile verification only.
+    /// This class is used during debugging to verify the method compiles.
+    /// The actual deployment will merge only the method into the real file.
+    /// </summary>
+    public class {className}
+    {{
+{fields}
+        #region Method Under Test
+        
+{methodCode}
+
+        #endregion
+    }}
+}}";
     }
 
     /// <summary>

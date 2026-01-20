@@ -349,7 +349,7 @@ public class CodebasesController : ControllerBase
             .Select(m => new MethodInfoDto
             {
                 Name = m.Name,
-                ReturnType = m.ReturnType,
+                ReturnType = m.ReturnType ?? "void",
                 Parameters = m.Parameters,
                 IsPublic = m.Modifiers.Contains("public"),
                 IsAsync = m.Modifiers.Contains("async")

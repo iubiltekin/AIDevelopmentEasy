@@ -111,6 +111,49 @@ When adding new code to an existing codebase:
 }
 ```
 
+## Targeted Modification Tasks
+
+When a task is for MODIFYING existing code (bug fix, enhancement), include these fields:
+
+```json
+{
+    "index": 1,
+    "project": "{ProjectName}",
+    "title": "Fix {MethodName} in {ClassName}",
+    "description": "Modify {MethodName} method to {change description}",
+    "target_files": ["{Project}/{Folder}/{ClassName}.cs"],
+    "namespace": "{Project}.{Folder}",
+    "is_modification": true,
+    "target_method": "{MethodName}"
+}
+```
+
+**Key Fields for Modifications:**
+- `is_modification: true` - Indicates this modifies existing code
+- `target_method` - The specific method to modify (other methods stay unchanged)
+
+**Unit Test Tasks for Targeted Modifications:**
+
+```json
+{
+    "index": 2,
+    "project": "{TestProjectName}",
+    "title": "Add tests for {MethodName}",
+    "description": "Write unit tests ONLY for the {MethodName} method",
+    "target_files": ["Tests/{TestProject}/{ClassName}_{MethodName}Tests.cs"],
+    "namespace": "{TestProject}",
+    "depends_on": [1],
+    "target_method": "{MethodName}"
+}
+```
+
+**IMPORTANT:** When `target_method` is specified:
+- Only that method should be modified
+- Tests should only cover that method
+- Other code in the file should remain unchanged
+
+Replace `{placeholders}` with actual values from the user's request.
+
 ## Task Ordering Principles
 
 1. **Core/Library first**: Implement shared functionality first

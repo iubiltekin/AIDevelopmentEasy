@@ -201,6 +201,25 @@ public class FileSystemStoryRepository : IStoryRepository
         return false;
     }
 
+    public async Task<bool> UpdateNameAsync(string id, string name, CancellationToken cancellationToken = default)
+    {
+        var jsonPath = Path.Combine(_storiesPath, $"{id}.json");
+        if (File.Exists(jsonPath))
+        {
+            var storyData = await LoadStoryDataAsync(jsonPath, cancellationToken);
+            if (storyData != null)
+            {
+                storyData.Name = name;
+                storyData.UpdatedAt = DateTime.UtcNow;
+                await SaveStoryDataAsync(storyData, cancellationToken);
+                _logger.LogInformation("Updated story name: {Id} → {Name}", id, name);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
         var deleted = false;
@@ -265,13 +284,17 @@ public class FileSystemStoryRepository : IStoryRepository
             TargetFile = request.TargetFile,
             TargetClass = request.TargetClass,
             TargetMethod = request.TargetMethod,
-            ChangeType = request.ChangeType
+            ChangeType = request.ChangeType,
+            // Test Target Info
+            TargetTestProject = request.TargetTestProject,
+            TargetTestFile = request.TargetTestFile,
+            TargetTestClass = request.TargetTestClass
         };
 
         await SaveStoryDataAsync(storyData, cancellationToken);
 
-        _logger.LogInformation("Created story: {Id} - {Name} (target: {Project}/{File})", 
-            id, request.Name, request.TargetProject ?? "none", request.TargetFile ?? "none");
+        _logger.LogInformation("Created story: {Id} - {Name} (target: {Project}/{File}, test: {TestFile})", 
+            id, request.Name, request.TargetProject ?? "none", request.TargetFile ?? "none", request.TargetTestFile ?? "none");
 
         return new StoryDto
         {
@@ -287,7 +310,10 @@ public class FileSystemStoryRepository : IStoryRepository
             TargetFile = request.TargetFile,
             TargetClass = request.TargetClass,
             TargetMethod = request.TargetMethod,
-            ChangeType = request.ChangeType
+            ChangeType = request.ChangeType,
+            TargetTestProject = request.TargetTestProject,
+            TargetTestFile = request.TargetTestFile,
+            TargetTestClass = request.TargetTestClass
         };
     }
 
@@ -310,17 +336,22 @@ public class FileSystemStoryRepository : IStoryRepository
         storyData.TargetClass = request.TargetClass;
         storyData.TargetMethod = request.TargetMethod;
         storyData.ChangeType = request.ChangeType;
+        // Update test target fields
+        storyData.TargetTestProject = request.TargetTestProject;
+        storyData.TargetTestFile = request.TargetTestFile;
+        storyData.TargetTestClass = request.TargetTestClass;
         storyData.UpdatedAt = DateTime.UtcNow;
 
         await SaveStoryDataAsync(storyData, cancellationToken);
 
-        _logger.LogInformation("Updated story target: {Id} → {Project}/{File}/{Class}.{Method} ({ChangeType})", 
+        _logger.LogInformation("Updated story target: {Id} → {Project}/{File}/{Class}.{Method} ({ChangeType}), Test: {TestFile}", 
             id, 
             request.TargetProject ?? "any", 
             request.TargetFile ?? "any", 
             request.TargetClass ?? "any",
             request.TargetMethod ?? "any",
-            request.ChangeType);
+            request.ChangeType,
+            request.TargetTestFile ?? "none");
 
         return true;
     }
@@ -384,7 +415,11 @@ public class FileSystemStoryRepository : IStoryRepository
                 TargetFile = data.TargetFile,
                 TargetClass = data.TargetClass,
                 TargetMethod = data.TargetMethod,
-                ChangeType = data.ChangeType
+                ChangeType = data.ChangeType,
+                // Test Target Info
+                TargetTestProject = data.TargetTestProject,
+                TargetTestFile = data.TargetTestFile,
+                TargetTestClass = data.TargetTestClass
             };
         }
         catch (Exception ex)
@@ -520,6 +555,11 @@ public class FileSystemStoryRepository : IStoryRepository
         public string? TargetClass { get; set; }
         public string? TargetMethod { get; set; }
         public ChangeType ChangeType { get; set; } = ChangeType.Create;
+
+        // Test Target Info (Optional)
+        public string? TargetTestProject { get; set; }
+        public string? TargetTestFile { get; set; }
+        public string? TargetTestClass { get; set; }
     }
 
     /// <summary>

@@ -49,6 +49,11 @@ public interface IStoryRepository
     Task<bool> UpdateContentAsync(string id, string content, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update story name
+    /// </summary>
+    Task<bool> UpdateNameAsync(string id, string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Delete a story
     /// </summary>
     Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default);

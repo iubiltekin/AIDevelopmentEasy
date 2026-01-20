@@ -67,7 +67,7 @@ public class StoriesController : ControllerBase
     }
 
     /// <summary>
-    /// Update story content (only allowed when status is NotStarted/Draft)
+    /// Update story content and/or name (only allowed when status is NotStarted/Draft)
     /// </summary>
     [HttpPut("{id}/content")]
     public async Task<ActionResult> UpdateContent(string id, [FromBody] UpdateContentRequest request, CancellationToken cancellationToken)
@@ -84,6 +84,12 @@ public class StoriesController : ControllerBase
                 error = "Cannot edit content", 
                 message = "Story must be reset before editing. Current status: " + story.Status 
             });
+        }
+
+        // Update name if provided
+        if (!string.IsNullOrWhiteSpace(request.Name))
+        {
+            await _storyRepository.UpdateNameAsync(id, request.Name, cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(request.Content))
@@ -214,5 +220,6 @@ public class StoriesController : ControllerBase
 
 public class UpdateContentRequest
 {
+    public string? Name { get; set; }
     public string Content { get; set; } = string.Empty;
 }

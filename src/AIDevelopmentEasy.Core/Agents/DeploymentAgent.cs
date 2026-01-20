@@ -37,9 +37,34 @@ public class DeploymentAgent
         Dictionary<string, string> generatedFiles,
         CancellationToken cancellationToken = default)
     {
+        // Convert to DeploymentFile format without modification info
+        var files = generatedFiles.Select(kvp => new DeploymentFile
+        {
+            RelativePath = kvp.Key,
+            Content = kvp.Value,
+            IsModification = false
+        }).ToList();
+
+        return await DeployAsync(codebaseAnalysis, files, cancellationToken);
+    }
+
+    /// <summary>
+    /// Deploy generated files to the codebase with modification support.
+    /// For modification files, only the specified method will be merged into the existing file.
+    /// </summary>
+    /// <param name="codebaseAnalysis">Codebase analysis with project information</param>
+    /// <param name="files">List of files to deploy with modification metadata</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Deployment result with details</returns>
+    public async Task<DeploymentResult> DeployAsync(
+        CodebaseAnalysis codebaseAnalysis,
+        List<DeploymentFile> files,
+        CancellationToken cancellationToken = default)
+    {
         var codebasePath = codebaseAnalysis.CodebasePath;
         _logger?.LogInformation("[Deployment] Starting deployment to: {Path}", codebasePath);
-        _logger?.LogInformation("[Deployment] Files to deploy: {Count}", generatedFiles.Count);
+        _logger?.LogInformation("[Deployment] Files to deploy: {Count} ({Mods} modifications)",
+            files.Count, files.Count(f => f.IsModification));
         _logger?.LogInformation("[Deployment] Available projects: {Projects}",
             string.Join(", ", codebaseAnalysis.Projects.Select(p => $"{p.Name} ({p.RelativePath})")));
 
@@ -52,10 +77,29 @@ public class DeploymentAgent
         try
         {
             // Step 1: Analyze and map files to projects using codebase analysis
+            var generatedFiles = files.ToDictionary(f => f.RelativePath, f => f.Content);
             var fileMappings = AnalyzeFileMappings(codebaseAnalysis, generatedFiles);
+            
+            // Apply modification metadata to mappings
+            foreach (var mapping in fileMappings)
+            {
+                var sourceFile = files.FirstOrDefault(f => f.RelativePath == mapping.GeneratedPath);
+                if (sourceFile != null)
+                {
+                    mapping.IsModification = sourceFile.IsModification;
+                    mapping.TargetMethodName = sourceFile.TargetMethodName;
+                    mapping.TargetClassName = sourceFile.TargetClassName;
+                    
+                    // Copy test file info for namespace conversion
+                    mapping.IsTestFile = sourceFile.IsTestFile;
+                    mapping.RealClassNamespace = sourceFile.RealClassNamespace;
+                    mapping.RealClassName = sourceFile.RealClassName;
+                }
+            }
+            
             _logger?.LogInformation("[Deployment] Mapped {Count} files to projects", fileMappings.Count);
 
-            // Step 2: Copy files to their target locations
+            // Step 2: Copy files to their target locations (with merge for modifications)
             var copyResults = await CopyFilesToCodebaseAsync(codebasePath, fileMappings, cancellationToken);
             result.CopiedFiles = copyResults;
 
@@ -347,7 +391,8 @@ public class DeploymentAgent
     }
 
     /// <summary>
-    /// Copy files to their target locations in the codebase
+    /// Copy files to their target locations in the codebase.
+    /// For modification tasks, merges the generated code into existing files.
     /// </summary>
     private async Task<List<FileCopyResult>> CopyFilesToCodebaseAsync(
         string codebasePath,
@@ -382,11 +427,53 @@ public class DeploymentAgent
                     _logger?.LogInformation("[Deployment] Created directory: {Dir}", targetDir);
                 }
 
-                // Check if file exists (modification vs new file)
-                result.IsNewFile = !File.Exists(mapping.TargetPath);
+                // Check if file exists
+                var fileExists = File.Exists(mapping.TargetPath);
+                result.IsNewFile = !fileExists;
+
+                string finalContent;
+
+                // If this is a modification and the file exists, merge the changes
+                if (mapping.IsModification && fileExists && !string.IsNullOrEmpty(mapping.TargetMethodName))
+                {
+                    var existingContent = await File.ReadAllTextAsync(mapping.TargetPath, cancellationToken);
+                    finalContent = MergeMethodIntoFile(existingContent, mapping.Content, mapping.TargetMethodName, mapping.TargetClassName);
+                    
+                    _logger?.LogInformation("[Deployment] ════════════════════════════════════════════════════");
+                    _logger?.LogInformation("[Deployment] METHOD MERGE COMPLETED:");
+                    _logger?.LogInformation("[Deployment]   File: {Path}", mapping.TargetPath);
+                    _logger?.LogInformation("[Deployment]   Method: {Method}()", mapping.TargetMethodName);
+                    _logger?.LogInformation("[Deployment]   Class: {Class}", mapping.TargetClassName ?? "N/A");
+                    _logger?.LogInformation("[Deployment]   Original size: {Size} chars", existingContent.Length);
+                    _logger?.LogInformation("[Deployment]   Final size: {Size} chars", finalContent.Length);
+                    _logger?.LogInformation("[Deployment] ════════════════════════════════════════════════════");
+                }
+                else
+                {
+                    // New file or full replacement
+                    finalContent = mapping.Content;
+                    
+                    if (mapping.IsModification)
+                    {
+                        _logger?.LogInformation("[Deployment] Full file replacement: {Path}", mapping.TargetPath);
+                    }
+                }
+
+                // For test files, convert dummy namespace references to real class namespace
+                if (mapping.IsTestFile && !string.IsNullOrEmpty(mapping.RealClassNamespace))
+                {
+                    finalContent = ConvertTestFileNamespaces(finalContent, mapping.RealClassNamespace, mapping.RealClassName);
+                    
+                    _logger?.LogInformation("[Deployment] ════════════════════════════════════════════════════");
+                    _logger?.LogInformation("[Deployment] TEST FILE NAMESPACE CONVERSION:");
+                    _logger?.LogInformation("[Deployment]   File: {Path}", mapping.TargetPath);
+                    _logger?.LogInformation("[Deployment]   Target Class: {Class}", mapping.RealClassName ?? "N/A");
+                    _logger?.LogInformation("[Deployment]   Real Namespace: {NS}", mapping.RealClassNamespace);
+                    _logger?.LogInformation("[Deployment] ════════════════════════════════════════════════════");
+                }
 
                 // Write the file
-                await File.WriteAllTextAsync(mapping.TargetPath, mapping.Content, cancellationToken);
+                await File.WriteAllTextAsync(mapping.TargetPath, finalContent, cancellationToken);
                 result.Success = true;
 
                 _logger?.LogInformation("[Deployment] {Action} file: {Path}",
@@ -403,6 +490,224 @@ public class DeploymentAgent
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Convert dummy namespace references in test file to real class namespace.
+    /// This allows test files to be compiled with dummy wrappers during debugging,
+    /// then converted to use real class references during deployment.
+    /// </summary>
+    private string ConvertTestFileNamespaces(string testContent, string realNamespace, string? realClassName)
+    {
+        var result = testContent;
+
+        // Add using statement for the real namespace if not already present
+        if (!result.Contains($"using {realNamespace};"))
+        {
+            // Find the last using statement and add after it
+            var lastUsingMatch = Regex.Match(result, @"(using\s+[^;]+;\s*\n)(?!using)", RegexOptions.RightToLeft);
+            if (lastUsingMatch.Success)
+            {
+                var insertPosition = lastUsingMatch.Index + lastUsingMatch.Length;
+                result = result.Insert(insertPosition, $"using {realNamespace};\n");
+                _logger?.LogDebug("[Deployment] Added using statement: using {NS};", realNamespace);
+            }
+            else
+            {
+                // No using statements found, add at the beginning
+                result = $"using {realNamespace};\n{result}";
+            }
+        }
+
+        // Remove any dummy/test namespace using statements that might conflict
+        result = Regex.Replace(result, @"using\s+TargetedModification\s*;\s*\n?", "");
+        result = Regex.Replace(result, @"using\s+DummyNamespace\s*;\s*\n?", "");
+
+        // If there's a dummy wrapper class instantiation, it should be removed or converted
+        // This is a safety measure in case the LLM generated dummy references
+
+        _logger?.LogDebug("[Deployment] Test file namespace conversion completed");
+        return result;
+    }
+
+    /// <summary>
+    /// Merge a generated method into an existing file by replacing the old method implementation.
+    /// </summary>
+    private string MergeMethodIntoFile(string existingContent, string generatedContent, string methodName, string? className)
+    {
+        _logger?.LogDebug("[Deployment] Merging method '{Method}' into existing file", methodName);
+
+        // Extract the new method from generated content
+        var newMethod = ExtractMethod(generatedContent, methodName);
+        
+        if (string.IsNullOrEmpty(newMethod))
+        {
+            _logger?.LogWarning("[Deployment] Could not extract method '{Method}' from generated content, using full replacement", methodName);
+            return generatedContent;
+        }
+
+        // Find and replace the old method in existing content
+        var oldMethod = ExtractMethod(existingContent, methodName);
+        
+        if (string.IsNullOrEmpty(oldMethod))
+        {
+            _logger?.LogWarning("[Deployment] Could not find method '{Method}' in existing file, using full replacement", methodName);
+            return generatedContent;
+        }
+
+        // Replace old method with new method
+        var result = existingContent.Replace(oldMethod, newMethod);
+        
+        _logger?.LogInformation("[Deployment] Successfully merged method '{Method}' ({OldLen} -> {NewLen} chars)",
+            methodName, oldMethod.Length, newMethod.Length);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Extract a method from C# source code including its signature and body.
+    /// </summary>
+    private string? ExtractMethod(string sourceCode, string methodName)
+    {
+        if (string.IsNullOrEmpty(sourceCode) || string.IsNullOrEmpty(methodName))
+            return null;
+
+        // Pattern to match method with various modifiers, return types, and generic parameters
+        // Captures: modifiers + return type + method name + generic params + parameters + where clauses + body
+        var pattern = $@"((?:(?:public|private|protected|internal|static|virtual|override|abstract|async|sealed|new|partial)\s+)*[\w<>\[\],\s\?]+\s+{Regex.Escape(methodName)}\s*(?:<[^>]+>)?\s*\([^)]*\)\s*(?:where[^{{]+)?\s*\{{)";
+        
+        var match = Regex.Match(sourceCode, pattern, RegexOptions.Singleline);
+        
+        if (!match.Success)
+        {
+            _logger?.LogDebug("[Deployment] Method pattern did not match for '{Method}'", methodName);
+            return null;
+        }
+
+        // Find the matching closing brace
+        var startIndex = match.Index;
+        var braceCount = 0;
+        var endIndex = startIndex;
+        var inString = false;
+        var inChar = false;
+        var inVerbatimString = false;
+        var escaped = false;
+
+        for (var i = match.Index + match.Length - 1; i < sourceCode.Length; i++)
+        {
+            var c = sourceCode[i];
+            var prevChar = i > 0 ? sourceCode[i - 1] : '\0';
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\' && (inString || inChar) && !inVerbatimString)
+            {
+                escaped = true;
+                continue;
+            }
+
+            // Handle verbatim strings
+            if (c == '@' && i + 1 < sourceCode.Length && sourceCode[i + 1] == '"' && !inString && !inChar)
+            {
+                inVerbatimString = true;
+                i++; // Skip the quote
+                continue;
+            }
+
+            if (inVerbatimString)
+            {
+                if (c == '"')
+                {
+                    // Check for escaped quote in verbatim string
+                    if (i + 1 < sourceCode.Length && sourceCode[i + 1] == '"')
+                    {
+                        i++; // Skip the escaped quote
+                        continue;
+                    }
+                    inVerbatimString = false;
+                }
+                continue;
+            }
+
+            if (c == '"' && !inChar)
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (c == '\'' && !inString)
+            {
+                inChar = !inChar;
+                continue;
+            }
+
+            if (!inString && !inChar)
+            {
+                if (c == '{') braceCount++;
+                if (c == '}')
+                {
+                    braceCount--;
+                    if (braceCount == 0)
+                    {
+                        endIndex = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (endIndex > startIndex)
+        {
+            // Include any XML documentation comments before the method
+            var methodWithDocs = IncludeXmlDocumentation(sourceCode, startIndex, endIndex);
+            return methodWithDocs;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Include XML documentation comments that precede a method
+    /// </summary>
+    private string IncludeXmlDocumentation(string sourceCode, int methodStart, int methodEnd)
+    {
+        var methodCode = sourceCode.Substring(methodStart, methodEnd - methodStart);
+        
+        // Look backwards for XML comments
+        var searchStart = methodStart;
+        var lines = sourceCode.Substring(0, methodStart).Split('\n');
+        
+        // Find the start of XML docs (if any)
+        var xmlDocStart = methodStart;
+        for (int i = lines.Length - 1; i >= 0; i--)
+        {
+            var line = lines[i].Trim();
+            
+            if (line.StartsWith("///") || line.StartsWith("[") || string.IsNullOrWhiteSpace(line))
+            {
+                // This could be part of the method's documentation/attributes
+                xmlDocStart -= lines[i].Length + 1; // +1 for newline
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Ensure we don't go negative
+        if (xmlDocStart < 0) xmlDocStart = 0;
+        
+        // Find actual start (skip leading whitespace but keep indentation)
+        while (xmlDocStart < methodStart && (sourceCode[xmlDocStart] == '\r' || sourceCode[xmlDocStart] == '\n'))
+        {
+            xmlDocStart++;
+        }
+
+        return sourceCode.Substring(xmlDocStart, methodEnd - xmlDocStart);
     }
 
     /// <summary>
@@ -575,20 +880,27 @@ public class DeploymentAgent
             if (File.Exists(path))
             {
                 projectsToBuild.Add(path);
+                _logger?.LogInformation("[Deployment] Will build MODIFIED project: {Project}", 
+                    Path.GetFileNameWithoutExtension(path));
             }
         }
 
-        // Add dependent projects
+        // Add dependent projects (projects that reference the modified ones)
         foreach (var path in dependentProjects)
         {
             if (!projectsToBuild.Contains(path, StringComparer.OrdinalIgnoreCase))
             {
                 projectsToBuild.Add(path);
+                _logger?.LogInformation("[Deployment] Will build DEPENDENT project: {Project} (references modified code)", 
+                    Path.GetFileNameWithoutExtension(path));
             }
         }
 
-        _logger?.LogInformation("[Deployment] Building {Count} projects (modified + dependents)",
-            projectsToBuild.Count);
+        _logger?.LogInformation("[Deployment] ═══════════════════════════════════════════════════════════");
+        _logger?.LogInformation("[Deployment] BUILD VERIFICATION: {Count} projects total", projectsToBuild.Count);
+        _logger?.LogInformation("[Deployment]   - Modified: {Modified}", modifiedProjectPaths.Count);
+        _logger?.LogInformation("[Deployment]   - Dependents: {Dependents}", dependentProjects.Count);
+        _logger?.LogInformation("[Deployment] ═══════════════════════════════════════════════════════════");
 
         // Build each project
         foreach (var projectPath in projectsToBuild)
@@ -607,13 +919,31 @@ public class DeploymentAgent
             var buildResult = await BuildWithMSBuildAsync(msbuildPath, projectPath, configuration, cancellationToken);
             results.Add(buildResult);
 
-            // If build fails, log but continue with other projects
-            if (!buildResult.Success)
+            // Log build result
+            if (buildResult.Success)
             {
-                _logger?.LogWarning("[Deployment] Build failed for {Project}: {Error}",
-                    projectName, buildResult.Error);
+                _logger?.LogInformation("[Deployment] ✓ Build PASSED: {Project}", projectName);
+            }
+            else
+            {
+                _logger?.LogWarning("[Deployment] ✗ Build FAILED: {Project}", projectName);
+                _logger?.LogWarning("[Deployment]   Error: {Error}", buildResult.Error);
+                
+                // If a dependent project fails, it means the method change broke something
+                if (dependentProjects.Contains(projectPath, StringComparer.OrdinalIgnoreCase))
+                {
+                    _logger?.LogError("[Deployment] ⚠️ BREAKING CHANGE DETECTED: Project '{Project}' that references the modified code failed to build!",
+                        projectName);
+                }
             }
         }
+
+        // Summary
+        var passedCount = results.Count(r => r.Success);
+        var failedCount = results.Count(r => !r.Success);
+        _logger?.LogInformation("[Deployment] ═══════════════════════════════════════════════════════════");
+        _logger?.LogInformation("[Deployment] BUILD SUMMARY: {Passed} passed, {Failed} failed", passedCount, failedCount);
+        _logger?.LogInformation("[Deployment] ═══════════════════════════════════════════════════════════");
 
         return results;
     }
@@ -872,6 +1202,53 @@ public class DeploymentAgent
 
 #region Result Models
 
+/// <summary>
+/// Represents a file to be deployed with optional modification metadata
+/// </summary>
+public class DeploymentFile
+{
+    /// <summary>
+    /// Relative path of the file (e.g., "ProjectName/Folder/ClassName.cs")
+    /// </summary>
+    public string RelativePath { get; set; } = "";
+    
+    /// <summary>
+    /// The generated code content
+    /// </summary>
+    public string Content { get; set; } = "";
+    
+    /// <summary>
+    /// If true, this is a modification to an existing file.
+    /// Only the specified method will be merged, not the entire file replaced.
+    /// </summary>
+    public bool IsModification { get; set; }
+    
+    /// <summary>
+    /// The specific method name to replace (for targeted modifications)
+    /// </summary>
+    public string? TargetMethodName { get; set; }
+    
+    /// <summary>
+    /// The specific class name being modified
+    /// </summary>
+    public string? TargetClassName { get; set; }
+
+    /// <summary>
+    /// If true, this is a test file that needs namespace conversion.
+    /// </summary>
+    public bool IsTestFile { get; set; }
+
+    /// <summary>
+    /// The real namespace of the class being tested (for test files).
+    /// </summary>
+    public string? RealClassNamespace { get; set; }
+
+    /// <summary>
+    /// The real class name being tested (for test files).
+    /// </summary>
+    public string? RealClassName { get; set; }
+}
+
 public class DeploymentResult
 {
     public bool Success { get; set; }
@@ -907,6 +1284,39 @@ public class FileMapping
     public string? TargetPath { get; set; }
     public string? ProjectName { get; set; }
     public string? ProjectPath { get; set; }
+    
+    /// <summary>
+    /// If true, this is a modification to an existing file.
+    /// The Content should be merged into the existing file rather than replacing it entirely.
+    /// </summary>
+    public bool IsModification { get; set; }
+    
+    /// <summary>
+    /// The specific method name to replace (for targeted modifications)
+    /// </summary>
+    public string? TargetMethodName { get; set; }
+    
+    /// <summary>
+    /// The specific class name being modified
+    /// </summary>
+    public string? TargetClassName { get; set; }
+
+    /// <summary>
+    /// If true, this is a test file that needs namespace conversion.
+    /// Dummy namespaces will be replaced with real class namespaces.
+    /// </summary>
+    public bool IsTestFile { get; set; }
+
+    /// <summary>
+    /// The real namespace of the class being tested (for test files).
+    /// Used to replace dummy namespace references.
+    /// </summary>
+    public string? RealClassNamespace { get; set; }
+
+    /// <summary>
+    /// The real class name being tested (for test files).
+    /// </summary>
+    public string? RealClassName { get; set; }
 }
 
 public class FileCopyResult

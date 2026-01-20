@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save, Target, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Play, RefreshCw, FileCode, Eye, Trash2, RotateCcw, History, X, Edit2, Save, Target } from 'lucide-react';
 import { StoryDto, StoryStatus, TaskStatus, TaskType, PipelineStatusDto, ChangeType, getChangeTypeLabel, getChangeTypeColor, ProjectSummaryDto, ClassInfoDto, MethodInfoDto } from '../types';
 import { storiesApi, pipelineApi, codebasesApi } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { PipelineHistorySummary } from '../components/PipelineHistorySummary';
+import { SearchableSelect } from '../components';
 
 export function StoryDetail() {
   const { id } = useParams<{ id: string }>();
@@ -12,6 +13,7 @@ export function StoryDetail() {
   const [story, setStory] = useState<StoryDto | null>(null);
   const [content, setContent] = useState<string>('');
   const [editedContent, setEditedContent] = useState<string>('');
+  const [editedName, setEditedName] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [output, setOutput] = useState<Record<string, string>>({});
@@ -34,6 +36,13 @@ export function StoryDetail() {
   const [targetSaving, setTargetSaving] = useState(false);
   const [targetDirty, setTargetDirty] = useState(false);
 
+  // Test Target State
+  const [testProjects, setTestProjects] = useState<ProjectSummaryDto[]>([]);
+  const [testClasses, setTestClasses] = useState<ClassInfoDto[]>([]);
+  const [targetTestProject, setTargetTestProject] = useState<string>('');
+  const [targetTestFile, setTargetTestFile] = useState<string>('');
+  const [targetTestClass, setTargetTestClass] = useState<string>('');
+
   useEffect(() => {
     const load = async () => {
       if (!id) return;
@@ -54,11 +63,17 @@ export function StoryDetail() {
         if (req.targetClass) setTargetClass(req.targetClass);
         if (req.targetMethod) setTargetMethod(req.targetMethod);
         if (req.changeType !== undefined) setChangeType(req.changeType);
+        // Load test target info
+        if (req.targetTestProject) setTargetTestProject(req.targetTestProject);
+        if (req.targetTestFile) setTargetTestFile(req.targetTestFile);
+        if (req.targetTestClass) setTargetTestClass(req.targetTestClass);
 
         // Load projects if codebase exists
         if (req.codebaseId) {
           const projs = await codebasesApi.getProjects(req.codebaseId).catch(() => []);
           setProjects(projs);
+          // Separate test projects
+          setTestProjects(projs.filter(p => p.isTestProject));
 
           // Load classes if target project exists
           if (req.targetProject) {
@@ -70,6 +85,12 @@ export function StoryDetail() {
               const meths = await codebasesApi.getClassMethods(req.codebaseId, req.targetProject, req.targetClass).catch(() => []);
               setMethods(meths);
             }
+          }
+
+          // Load test classes if test project exists
+          if (req.targetTestProject) {
+            const testCls = await codebasesApi.getProjectClasses(req.codebaseId, req.targetTestProject).catch(() => []);
+            setTestClasses(testCls);
           }
         }
 
@@ -134,6 +155,31 @@ export function StoryDetail() {
     setTargetDirty(true);
   };
 
+  // Test target handlers
+  const handleTestProjectChange = async (projectName: string) => {
+    setTargetTestProject(projectName);
+    setTargetTestFile('');
+    setTargetTestClass('');
+    setTestClasses([]);
+    setTargetDirty(true);
+
+    if (projectName && story?.codebaseId) {
+      const cls = await codebasesApi.getProjectClasses(story.codebaseId, projectName).catch(() => []);
+      setTestClasses(cls);
+    }
+  };
+
+  const handleTestClassChange = (className: string) => {
+    setTargetTestClass(className);
+    setTargetDirty(true);
+
+    // Auto-fill test file path from class
+    const selectedClass = testClasses.find(c => c.name === className);
+    if (selectedClass) {
+      setTargetTestFile(selectedClass.filePath);
+    }
+  };
+
   const handleSaveTarget = async () => {
     if (!id) return;
     
@@ -144,7 +190,11 @@ export function StoryDetail() {
         targetFile: targetFile || undefined,
         targetClass: targetClass || undefined,
         targetMethod: targetMethod || undefined,
-        changeType
+        changeType,
+        // Test target
+        targetTestProject: targetTestProject || undefined,
+        targetTestFile: targetTestFile || undefined,
+        targetTestClass: targetTestClass || undefined
       });
       setTargetDirty(false);
       // Update local story state
@@ -155,7 +205,10 @@ export function StoryDetail() {
           targetFile,
           targetClass,
           targetMethod,
-          changeType
+          changeType,
+          targetTestProject,
+          targetTestFile,
+          targetTestClass
         });
       }
     } catch (err) {
@@ -223,6 +276,7 @@ export function StoryDetail() {
 
   const handleEditContent = () => {
     setEditedContent(content);
+    setEditedName(story?.name || '');
     setIsEditing(true);
     setError(null);
   };
@@ -230,6 +284,7 @@ export function StoryDetail() {
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditedContent('');
+    setEditedName('');
     setError(null);
   };
 
@@ -239,12 +294,22 @@ export function StoryDetail() {
       return;
     }
 
+    if (!editedName.trim()) {
+      setError('Name cannot be empty');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      await storiesApi.updateContent(id, editedContent);
+      await storiesApi.updateContent(id, editedContent, editedName);
       setContent(editedContent);
+      // Update local story state with new name
+      if (story) {
+        setStory({ ...story, name: editedName });
+      }
       setIsEditing(false);
       setEditedContent('');
+      setEditedName('');
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save content');
@@ -386,81 +451,73 @@ export function StoryDetail() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {/* Change Type */}
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Change Type</label>
-              <div className="flex gap-2">
-                {[ChangeType.Create, ChangeType.Modify, ChangeType.Delete].map(type => (
-                  <button
-                    key={type}
-                    onClick={() => handleChangeTypeChange(type)}
-                    className={`flex-1 px-2 py-2 rounded-lg text-sm transition-colors ${
-                      changeType === type
-                        ? `${getChangeTypeColor(type)} text-white`
-                        : 'bg-slate-700 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {getChangeTypeLabel(type)}
-                  </button>
-                ))}
-              </div>
+          {/* Change Type Buttons - Top Row */}
+          <div className="mb-4">
+            <label className="block text-sm text-slate-400 mb-1">Change Type</label>
+            <div className="flex gap-2">
+              {[ChangeType.Create, ChangeType.Modify, ChangeType.Delete].map(type => (
+                <button
+                  key={type}
+                  onClick={() => handleChangeTypeChange(type)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    changeType === type
+                      ? `${getChangeTypeColor(type)} text-white`
+                      : 'bg-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {getChangeTypeLabel(type)}
+                </button>
+              ))}
             </div>
+          </div>
 
+          {/* Code Target Row */}
+          <div className="grid grid-cols-4 gap-4 mb-4">
             {/* Project Dropdown */}
             <div>
               <label className="block text-sm text-slate-400 mb-1">Project</label>
-              <div className="relative">
-                <select
-                  value={targetProject}
-                  onChange={(e) => handleProjectChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="">Any Project</option>
-                  {projects.filter(p => !p.isTestProject).map(p => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
+              <SearchableSelect
+                value={targetProject}
+                onChange={handleProjectChange}
+                options={projects.filter(p => !p.isTestProject).map(p => ({
+                  value: p.name,
+                  label: p.name,
+                  sublabel: `${p.classCount} classes`
+                }))}
+                placeholder="Any Project"
+              />
             </div>
 
             {/* Class Dropdown */}
             <div>
               <label className="block text-sm text-slate-400 mb-1">Class</label>
-              <div className="relative">
-                <select
-                  value={targetClass}
-                  onChange={(e) => handleClassChange(e.target.value)}
-                  disabled={!targetProject}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">Any Class</option>
-                  {classes.map(c => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
+              <SearchableSelect
+                value={targetClass}
+                onChange={handleClassChange}
+                options={classes.map(c => ({
+                  value: c.name,
+                  label: c.name,
+                  sublabel: c.filePath
+                }))}
+                placeholder="Any Class"
+                disabled={!targetProject}
+              />
             </div>
 
             {/* Method Dropdown */}
             <div>
               <label className="block text-sm text-slate-400 mb-1">Method</label>
-              <div className="relative">
-                <select
-                  value={targetMethod}
-                  onChange={(e) => handleMethodChange(e.target.value)}
-                  disabled={!targetClass}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none cursor-pointer focus:border-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">Any Method</option>
-                  {methods.map(m => (
-                    <option key={m.name} value={m.name}>{m.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
+              <SearchableSelect
+                value={targetMethod}
+                onChange={handleMethodChange}
+                options={methods.map(m => ({
+                  value: m.name,
+                  label: m.name,
+                  sublabel: `${m.returnType}(${m.parameters.length} params)`
+                }))}
+                placeholder="Any Method"
+                disabled={!targetClass}
+              />
             </div>
 
             {/* File Path (auto-filled) */}
@@ -476,18 +533,81 @@ export function StoryDetail() {
             </div>
           </div>
 
+          {/* Test Target Row - Below Code Target */}
+          {testProjects.length > 0 && (
+            <div className="grid grid-cols-4 gap-4">
+              {/* Test Project Dropdown */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Test Project</label>
+                <SearchableSelect
+                  value={targetTestProject}
+                  onChange={handleTestProjectChange}
+                  options={testProjects.map(p => ({
+                    value: p.name,
+                    label: p.name,
+                    sublabel: `${p.classCount} test classes`
+                  }))}
+                  placeholder="Select Test Project"
+                />
+              </div>
+
+              {/* Test Class Dropdown */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Test Class</label>
+                <SearchableSelect
+                  value={targetTestClass}
+                  onChange={handleTestClassChange}
+                  options={testClasses.map(c => ({
+                    value: c.name,
+                    label: c.name,
+                    sublabel: c.filePath
+                  }))}
+                  placeholder="Select Test Class"
+                  disabled={!targetTestProject}
+                />
+              </div>
+
+              {/* Test File Path (auto-filled) */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Test File</label>
+                <input
+                  type="text"
+                  value={targetTestFile}
+                  onChange={(e) => { setTargetTestFile(e.target.value); setTargetDirty(true); }}
+                  placeholder="Auto-filled from class"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Empty cell for alignment */}
+              <div></div>
+            </div>
+          )}
+
           {/* Selected Target Summary */}
-          {(targetProject || targetClass || targetMethod) && (
-            <div className="mt-4 p-3 bg-slate-900 rounded-lg">
-              <span className="text-sm text-slate-400">Target: </span>
-              <span className="text-sm text-white font-mono">
-                {targetProject || '*'}
-                {targetClass && ` → ${targetClass}`}
-                {targetMethod && `.${targetMethod}()`}
-              </span>
-              <span className={`ml-3 px-2 py-0.5 rounded text-xs ${getChangeTypeColor(changeType)} text-white`}>
-                {getChangeTypeLabel(changeType)}
-              </span>
+          {(targetProject || targetClass || targetMethod || targetTestClass) && (
+            <div className="mt-4 p-3 bg-slate-900 rounded-lg space-y-2">
+              {(targetProject || targetClass || targetMethod) && (
+                <div>
+                  <span className="text-sm text-slate-400">Code Target: </span>
+                  <span className="text-sm text-white font-mono">
+                    {targetProject || '*'}
+                    {targetClass && ` → ${targetClass}`}
+                    {targetMethod && `.${targetMethod}()`}
+                  </span>
+                  <span className={`ml-3 px-2 py-0.5 rounded text-xs ${getChangeTypeColor(changeType)} text-white`}>
+                    {getChangeTypeLabel(changeType)}
+                  </span>
+                </div>
+              )}
+              {targetTestClass && (
+                <div>
+                  <span className="text-sm text-slate-400">Test Target: </span>
+                  <span className="text-sm text-white font-mono">
+                    {targetTestProject || '*'} → {targetTestClass}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -606,12 +726,28 @@ export function StoryDetail() {
             
             {isEditing ? (
               <div className="space-y-4">
-                <textarea
-                  value={editedContent}
-                  onChange={(e) => setEditedContent(e.target.value)}
-                  className="w-full h-96 bg-slate-900 p-4 rounded-lg text-slate-300 font-mono text-sm border border-slate-600 focus:border-blue-500 focus:outline-none resize-y"
-                  placeholder="Enter story content..."
-                />
+                {/* Name Input */}
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Story Name</label>
+                  <input
+                    type="text"
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                    placeholder="Enter story name..."
+                  />
+                </div>
+                
+                {/* Content Textarea */}
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Content</label>
+                  <textarea
+                    value={editedContent}
+                    onChange={(e) => setEditedContent(e.target.value)}
+                    className="w-full h-96 bg-slate-900 p-4 rounded-lg text-slate-300 font-mono text-sm border border-slate-600 focus:border-blue-500 focus:outline-none resize-y"
+                    placeholder="Enter story content..."
+                  />
+                </div>
                 <div className="flex items-center justify-end gap-3">
                   <button
                     onClick={handleCancelEdit}

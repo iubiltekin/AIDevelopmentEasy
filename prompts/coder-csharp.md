@@ -96,12 +96,69 @@ namespace Picus.Common.Helpers  // EXACT namespace from task
 - Naming: MethodName_Scenario_ExpectedResult
 - For console demo apps, use static void Main() with Console.WriteLine
 
+## Targeted Modification (METHOD-ONLY Changes)
+
+When the task specifies a **TARGET METHOD** to modify in an existing file:
+
+1. **READ the current file content** - provided in `## CURRENT FILE CONTENT` section
+2. **IDENTIFY the target method** - specified in `## TARGET METHOD` section  
+3. **ONLY modify that specific method** - leave ALL other code untouched
+4. **Output the COMPLETE file** - with only the target method changed
+
+### Rules for ANY target method:
+
+When task says: `TARGET METHOD: {MethodName}` in class `{ClassName}`
+
+You must:
+- Find `{MethodName}` in the provided file content
+- Modify ONLY that method's implementation
+- Keep ALL other methods exactly as they are (copy them unchanged)
+- Keep ALL using statements, fields, properties, constructors unchanged
+- Output the complete file with your single method change
+
+**CRITICAL for Targeted Modifications:**
+- Do NOT add new methods unless explicitly required
+- Do NOT rename the class or change inheritance
+- Do NOT modify other method signatures
+- Do NOT remove or reorder using statements
+- Do NOT change code outside the target method
+- PRESERVE all XML documentation comments
+- Copy unchanged methods exactly as provided (including their { ... } bodies)
+
+## Focused Unit Testing (TARGET METHOD ONLY)
+
+When the task specifies a **TARGET METHOD** to test:
+
+1. **Write tests ONLY for that method** - not other methods in the class
+2. **Test class naming**: `{ClassName}_{MethodName}Tests`
+3. **Test method naming**: `{MethodName}_Scenario_ExpectedResult`
+
+### Rules for ANY target method:
+
+When task says: `TARGET METHOD: {MethodName}` in class `{ClassName}`
+
+You must:
+- Create test class named `{ClassName}_{MethodName}Tests`
+- Write tests ONLY for `{MethodName}`
+- Do NOT write tests for other methods in the class
+- Cover: happy path, edge cases, error conditions
+
+**Test Naming Pattern:**
+```
+{MethodName}_WhenValidInput_ReturnsExpectedResult
+{MethodName}_WhenNullInput_ThrowsArgumentNullException  
+{MethodName}_WhenEdgeCase_HandlesCorrectly
+```
+
+**CRITICAL:** Do NOT test other methods - focus only on the specified target.
+
 ## Output Format
 
 - Output ONLY the code in a markdown code block
 - Include ALL necessary using statements
 - If it's a class, include the full class definition with correct namespace
 - If modifying existing code, output the complete updated file
+- For targeted modifications, preserve ALL code except the target method
 
 ```csharp
 using System;

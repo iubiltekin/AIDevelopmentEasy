@@ -92,11 +92,11 @@ export const storiesApi = {
     await handleResponse<void>(response);
   },
 
-  updateContent: async (id: string, content: string): Promise<void> => {
+  updateContent: async (id: string, content: string, name?: string): Promise<void> => {
     const response = await fetch(`${API_BASE}/stories/${id}/content`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ content, name })
     });
     await handleResponse<void>(response);
   },

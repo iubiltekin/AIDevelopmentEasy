@@ -47,6 +47,25 @@ public class StoryDto
     /// Type of change: Create new, Modify existing, or Delete
     /// </summary>
     public ChangeType ChangeType { get; set; } = ChangeType.Create;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Test Target Info (Optional) - For unit test modifications
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Target test project name (e.g., "AIDevelopmentEasy.Tests")
+    /// </summary>
+    public string? TargetTestProject { get; set; }
+
+    /// <summary>
+    /// Target test file path (e.g., "Services/UserServiceTests.cs")
+    /// </summary>
+    public string? TargetTestFile { get; set; }
+
+    /// <summary>
+    /// Target test class name (e.g., "UserServiceTests")
+    /// </summary>
+    public string? TargetTestClass { get; set; }
 }
 
 /// <summary>
@@ -113,6 +132,18 @@ public class TaskDto
     /// This is populated from generatedFiles before rollback so it's available for LLM.
     /// </summary>
     public string? ExistingCode { get; set; }
+
+    /// <summary>
+    /// Target method name for focused modifications.
+    /// When set, only this method should be modified (not the entire file).
+    /// </summary>
+    public string? TargetMethod { get; set; }
+
+    /// <summary>
+    /// Original file content for merge during deployment.
+    /// Used when modifying a specific method - the method is merged back into this file.
+    /// </summary>
+    public string? CurrentContent { get; set; }
 }
 
 /// <summary>
@@ -242,6 +273,11 @@ public class CreateStoryRequest
     public string? TargetClass { get; set; }
     public string? TargetMethod { get; set; }
     public ChangeType ChangeType { get; set; } = ChangeType.Create;
+
+    // Test Target Info (Optional)
+    public string? TargetTestProject { get; set; }
+    public string? TargetTestFile { get; set; }
+    public string? TargetTestClass { get; set; }
 }
 
 /// <summary>
@@ -249,30 +285,17 @@ public class CreateStoryRequest
 /// </summary>
 public class UpdateStoryTargetRequest
 {
-    /// <summary>
-    /// Target project name within the codebase
-    /// </summary>
+    // Code Target
     public string? TargetProject { get; set; }
-
-    /// <summary>
-    /// Target file path relative to codebase
-    /// </summary>
     public string? TargetFile { get; set; }
-
-    /// <summary>
-    /// Target class name
-    /// </summary>
     public string? TargetClass { get; set; }
-
-    /// <summary>
-    /// Target method name
-    /// </summary>
     public string? TargetMethod { get; set; }
-
-    /// <summary>
-    /// Type of change
-    /// </summary>
     public ChangeType ChangeType { get; set; } = ChangeType.Create;
+
+    // Test Target
+    public string? TargetTestProject { get; set; }
+    public string? TargetTestFile { get; set; }
+    public string? TargetTestClass { get; set; }
 }
 
 /// <summary>

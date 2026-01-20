@@ -180,6 +180,12 @@ public record SubTask
     /// Helps ensure correct namespace declaration.
     /// </summary>
     public string? Namespace { get; init; }
+    
+    /// <summary>
+    /// Target method name for focused modifications.
+    /// When set, only this method should be modified/tested.
+    /// </summary>
+    public string? TargetMethod { get; init; }
 }
 
 public enum SubTaskStatus

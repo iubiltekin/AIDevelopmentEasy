@@ -84,6 +84,10 @@ export interface StoryDto {
   targetClass?: string;
   targetMethod?: string;
   changeType?: ChangeType;
+  // Test Target Info (Optional)
+  targetTestProject?: string;
+  targetTestFile?: string;
+  targetTestClass?: string;
 }
 
 export enum ChangeType {
@@ -98,6 +102,10 @@ export interface UpdateStoryTargetRequest {
   targetClass?: string;
   targetMethod?: string;
   changeType?: ChangeType;
+  // Test Target
+  targetTestProject?: string;
+  targetTestFile?: string;
+  targetTestClass?: string;
 }
 
 export interface PhaseStatusDto {
@@ -210,6 +218,10 @@ export interface CreateStoryRequest {
   targetClass?: string;
   targetMethod?: string;
   changeType?: ChangeType;
+  // Test Target Info (Optional)
+  targetTestProject?: string;
+  targetTestFile?: string;
+  targetTestClass?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
