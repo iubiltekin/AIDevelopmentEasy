@@ -16,7 +16,7 @@ public abstract class BaseAgent : IAgent
 
     public abstract string Name { get; }
     public abstract string Role { get; }
-    
+
     /// <summary>
     /// The name of the prompt file (without extension) in the prompts/ directory
     /// </summary>
@@ -49,10 +49,10 @@ public abstract class BaseAgent : IAgent
                 _logger?.LogWarning("[{Agent}] Prompt file not found: {File}, using fallback", Name, PromptFileName);
             }
         }
-        
+
         return GetFallbackPrompt();
     }
-    
+
     /// <summary>
     /// Get the fallback hardcoded prompt (override in derived classes)
     /// </summary>
@@ -112,7 +112,7 @@ public abstract class BaseAgent : IAgent
         CancellationToken cancellationToken = default)
     {
         var startTime = DateTime.UtcNow;
-        
+
         // Estimate input tokens
         var estimatedInputTokens = EstimateTokens(systemPrompt) + EstimateTokens(userPrompt);
         var effectiveMaxTokens = Math.Min(maxTokens, _maxCompletionTokens);
@@ -194,7 +194,7 @@ public abstract class BaseAgent : IAgent
     {
         var startTime = DateTime.UtcNow;
         var effectiveMaxTokens = Math.Min(maxTokens, _maxCompletionTokens);
-        
+
         var options = new ChatCompletionsOptions
         {
             DeploymentName = _deploymentName,
@@ -203,7 +203,7 @@ public abstract class BaseAgent : IAgent
         };
 
         options.Messages.Add(new ChatRequestSystemMessage(systemPrompt));
-        
+
         foreach (var (role, content) in messages)
         {
             if (role == "user")
@@ -275,7 +275,7 @@ public abstract class BaseAgent : IAgent
     protected string ExtractCode(string response, string language = "")
     {
         var marker = string.IsNullOrEmpty(language) ? "```" : $"```{language}";
-        
+
         if (response.Contains(marker))
         {
             var start = response.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
@@ -300,7 +300,7 @@ public abstract class BaseAgent : IAgent
             if (end > start)
                 return response.Substring(start, end - start).Trim();
         }
-        
+
         return response.Trim();
     }
 
@@ -324,7 +324,7 @@ public abstract class BaseAgent : IAgent
     protected string BuildSystemPromptWithStandards(ProjectState? state)
     {
         var basePrompt = GetSystemPrompt();
-        
+
         if (state?.CodingStandards == null)
             return basePrompt;
 

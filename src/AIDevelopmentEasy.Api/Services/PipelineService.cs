@@ -35,6 +35,7 @@ public class PipelineService : IPipelineService
     private readonly IOutputRepository _outputRepository;
     private readonly ICodebaseRepository _codebaseRepository;
     private readonly IPipelineNotificationService _notificationService;
+    private readonly IKnowledgeService _knowledgeService;
     private readonly PlannerAgent _plannerAgent;
     private readonly CoderAgent _coderAgent;
     private readonly DebuggerAgent _debuggerAgent;
@@ -57,6 +58,7 @@ public class PipelineService : IPipelineService
         IOutputRepository outputRepository,
         ICodebaseRepository codebaseRepository,
         IPipelineNotificationService notificationService,
+        IKnowledgeService knowledgeService,
         PlannerAgent plannerAgent,
         CoderAgent coderAgent,
         DebuggerAgent debuggerAgent,
@@ -72,6 +74,7 @@ public class PipelineService : IPipelineService
         _outputRepository = outputRepository;
         _codebaseRepository = codebaseRepository;
         _notificationService = notificationService;
+        _knowledgeService = knowledgeService;
         _plannerAgent = plannerAgent;
         _coderAgent = coderAgent;
         _debuggerAgent = debuggerAgent;
@@ -935,6 +938,19 @@ public class PipelineService : IPipelineService
 
             // Save pipeline history to disk for permanent access
             await _outputRepository.SavePipelineHistoryAsync(storyId, execution.Status, ct);
+
+            // ═══════════════════════════════════════════════════════════════════════════════
+            // Knowledge Base: Capture successful patterns (V-Bounce Step 6)
+            // ═══════════════════════════════════════════════════════════════════════════════
+            try
+            {
+                await CaptureKnowledgeFromPipelineAsync(storyId, execution, ct);
+            }
+            catch (Exception kbEx)
+            {
+                // Don't fail the pipeline if knowledge capture fails
+                _logger.LogWarning(kbEx, "[{StoryId}] Knowledge capture failed (non-fatal)", storyId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -2546,6 +2562,62 @@ Analyze the test failure and determine:
 
         _logger.LogInformation("[{StoryId}] Pipeline completed successfully after {RetryAttempts} retry(s)!",
             storyId, execution.RetryAttempt);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Knowledge Base Integration (V-Bounce Step 6: Knowledge Capture)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Captures knowledge from a successfully completed pipeline.
+    /// This implements V-Bounce model's "Knowledge Capture" step.
+    /// </summary>
+    private async Task CaptureKnowledgeFromPipelineAsync(
+        string storyId,
+        PipelineExecution execution,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("[{StoryId}] Capturing knowledge from completed pipeline", storyId);
+
+        // Get all tasks for this story
+        var tasks = await _taskRepository.GetByStoryAsync(storyId, cancellationToken);
+
+        // Get generated files
+        var generatedFiles = await _outputRepository.GetGeneratedFilesAsync(storyId, cancellationToken);
+
+        // Capture patterns from generated code
+        if (generatedFiles != null && generatedFiles.Any())
+        {
+            await _knowledgeService.CaptureFromCompletedPipelineAsync(
+                storyId, generatedFiles, cancellationToken);
+        }
+
+        // Capture individual task implementations as patterns
+        foreach (var task in tasks.Where(t => t.Status == Models.TaskStatus.Completed))
+        {
+            var taskFile = task.TargetFiles.FirstOrDefault();
+            if (!string.IsNullOrEmpty(taskFile) && generatedFiles != null)
+            {
+                var fileContent = generatedFiles
+                    .FirstOrDefault(kv => kv.Key.EndsWith(taskFile, StringComparison.OrdinalIgnoreCase))
+                    .Value;
+
+                if (!string.IsNullOrEmpty(fileContent))
+                {
+                    await _knowledgeService.CapturePatternFromStoryAsync(
+                        storyId,
+                        task.Title,
+                        task.Description,
+                        fileContent,
+                        cancellationToken: cancellationToken);
+                }
+            }
+        }
+
+        // Mark all knowledge from this story as verified (since pipeline completed successfully)
+        await _knowledgeService.VerifyStoryKnowledgeAsync(storyId, cancellationToken);
+
+        _logger.LogInformation("[{StoryId}] Knowledge capture completed", storyId);
     }
 
     /// <summary>

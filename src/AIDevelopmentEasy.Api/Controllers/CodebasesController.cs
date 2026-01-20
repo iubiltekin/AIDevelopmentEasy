@@ -69,7 +69,7 @@ public class CodebasesController : ControllerBase
     }
 
     /// <summary>
-    /// Get analysis as context string (for prompts)
+    /// Get analysis as context string (for prompts) - DEPRECATED: Use /context/requirement or /context/pipeline
     /// </summary>
     [HttpGet("{id}/context")]
     public async Task<ActionResult<string>> GetContext(string id, CancellationToken cancellationToken)
@@ -80,6 +80,59 @@ public class CodebasesController : ControllerBase
 
         var context = _codeAnalysisAgent.GenerateContextForPrompt(analysis);
         return Ok(context);
+    }
+
+    /// <summary>
+    /// Get lightweight context for Requirements Wizard (optimized for lower token usage)
+    /// </summary>
+    [HttpGet("{id}/context/requirement")]
+    public async Task<ActionResult<RequirementContextDto>> GetRequirementContext(string id, CancellationToken cancellationToken)
+    {
+        var analysis = await _codebaseRepository.GetAnalysisAsync(id, cancellationToken);
+        if (analysis == null)
+            return NotFound("Analysis not available. Run /analyze first.");
+
+        return Ok(new RequirementContextDto
+        {
+            SummaryText = analysis.RequirementContext.SummaryText,
+            TokenEstimate = analysis.RequirementContext.TokenEstimate,
+            Projects = analysis.RequirementContext.Projects.Select(p => new ProjectBriefDto
+            {
+                Name = p.Name,
+                Type = p.Type,
+                Purpose = p.Purpose,
+                KeyNamespaces = p.KeyNamespaces
+            }).ToList(),
+            Architecture = analysis.RequirementContext.Architecture,
+            Technologies = analysis.RequirementContext.Technologies,
+            ExtensionPoints = analysis.RequirementContext.ExtensionPoints.Select(e => new ExtensionPointDto
+            {
+                Layer = e.Layer,
+                Project = e.Project,
+                Namespace = e.Namespace,
+                Pattern = e.Pattern
+            }).ToList()
+        });
+    }
+
+    /// <summary>
+    /// Get full context for Pipeline operations (detailed for code generation)
+    /// </summary>
+    [HttpGet("{id}/context/pipeline")]
+    public async Task<ActionResult<PipelineContextDto>> GetPipelineContext(string id, CancellationToken cancellationToken)
+    {
+        var analysis = await _codebaseRepository.GetAnalysisAsync(id, cancellationToken);
+        if (analysis == null)
+            return NotFound("Analysis not available. Run /analyze first.");
+
+        return Ok(new PipelineContextDto
+        {
+            FullContextText = analysis.PipelineContext.FullContextText,
+            TokenEstimate = analysis.PipelineContext.TokenEstimate,
+            ProjectCount = analysis.PipelineContext.ProjectDetails.Count,
+            ClassCount = analysis.PipelineContext.ProjectDetails.Sum(p => p.Classes.Count),
+            InterfaceCount = analysis.PipelineContext.ProjectDetails.Sum(p => p.Interfaces.Count)
+        });
     }
 
     /// <summary>
@@ -217,4 +270,55 @@ public class ProjectSummaryDto
     public int InterfaceCount { get; set; }
     public List<string> DetectedPatterns { get; set; } = new();
     public List<string> ProjectReferences { get; set; } = new();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Context DTOs (Two-Level LLM Optimization)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Lightweight context for Requirements Wizard
+/// </summary>
+public class RequirementContextDto
+{
+    public string SummaryText { get; set; } = string.Empty;
+    public int TokenEstimate { get; set; }
+    public List<ProjectBriefDto> Projects { get; set; } = new();
+    public List<string> Architecture { get; set; } = new();
+    public List<string> Technologies { get; set; } = new();
+    public List<ExtensionPointDto> ExtensionPoints { get; set; } = new();
+}
+
+/// <summary>
+/// Brief project info
+/// </summary>
+public class ProjectBriefDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public string Purpose { get; set; } = string.Empty;
+    public List<string> KeyNamespaces { get; set; } = new();
+}
+
+/// <summary>
+/// Extension point info
+/// </summary>
+public class ExtensionPointDto
+{
+    public string Layer { get; set; } = string.Empty;
+    public string Project { get; set; } = string.Empty;
+    public string Namespace { get; set; } = string.Empty;
+    public string? Pattern { get; set; }
+}
+
+/// <summary>
+/// Full context for Pipeline operations
+/// </summary>
+public class PipelineContextDto
+{
+    public string FullContextText { get; set; } = string.Empty;
+    public int TokenEstimate { get; set; }
+    public int ProjectCount { get; set; }
+    public int ClassCount { get; set; }
+    public int InterfaceCount { get; set; }
 }

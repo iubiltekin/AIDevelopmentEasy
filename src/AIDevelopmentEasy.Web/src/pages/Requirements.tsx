@@ -80,7 +80,8 @@ export default function Requirements() {
     
     try {
       await requirementsApi.delete(id);
-      setRequirements(requirements.filter(r => r.id !== id));
+      // Reload data to ensure UI is in sync
+      await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete requirement');
     }

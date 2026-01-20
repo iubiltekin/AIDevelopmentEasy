@@ -72,6 +72,7 @@ var outputPath = Path.Combine(appDataDir, "output");
 var promptsPath = Path.Combine(appDataDir, "prompts");
 var codebasesPath = Path.Combine(appDataDir, "codebases");
 var requirementsPath = Path.Combine(appDataDir, "requirements");
+var knowledgeBasePath = Path.Combine(appDataDir, "knowledge-base");
 
 // Ensure all directories exist
 Directory.CreateDirectory(appDataDir);
@@ -80,6 +81,7 @@ Directory.CreateDirectory(outputPath);
 Directory.CreateDirectory(promptsPath);
 Directory.CreateDirectory(codebasesPath);
 Directory.CreateDirectory(requirementsPath);
+Directory.CreateDirectory(knowledgeBasePath);
 
 // Copy default prompts if prompts directory is empty
 CopyDefaultPromptsIfNeeded(promptsPath);
@@ -158,6 +160,9 @@ builder.Services.AddSingleton<ICodebaseRepository>(sp =>
 builder.Services.AddSingleton<IRequirementRepository>(sp =>
     new FileSystemRequirementRepository(requirementsPath, sp.GetRequiredService<ILogger<FileSystemRequirementRepository>>()));
 
+builder.Services.AddSingleton<IKnowledgeRepository>(sp =>
+    new FileSystemKnowledgeRepository(knowledgeBasePath, sp.GetRequiredService<ILogger<FileSystemKnowledgeRepository>>()));
+
 // Agents
 builder.Services.AddSingleton(sp =>
     new CodeAnalysisAgent(sp.GetRequiredService<ILogger<CodeAnalysisAgent>>()));
@@ -193,6 +198,9 @@ builder.Services.AddSingleton<IPipelineService, PipelineService>();
 
 // Requirement Wizard Service
 builder.Services.AddSingleton<IRequirementWizardService, RequirementWizardService>();
+
+// Knowledge Service
+builder.Services.AddSingleton<IKnowledgeService, KnowledgeService>();
 
 var app = builder.Build();
 
@@ -239,6 +247,7 @@ Log.Information("  Mode: {Mode}", WindowsServiceHelpers.IsWindowsService() ? "Wi
 Log.Information("  Stories: {Path}", storiesPath);
 Log.Information("  Codebases: {Path}", codebasesPath);
 Log.Information("  Output: {Path}", outputPath);
+Log.Information("  Knowledge Base: {Path}", knowledgeBasePath);
 Log.Information("  API: /swagger");
 Log.Information("  Web UI: / (if wwwroot exists)");
 Log.Information("════════════════════════════════════════════════════════════");

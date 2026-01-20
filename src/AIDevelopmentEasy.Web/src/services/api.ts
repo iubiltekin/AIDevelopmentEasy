@@ -6,6 +6,8 @@ import type {
   CodebaseDto,
   CreateCodebaseRequest,
   ProjectSummaryDto,
+  RequirementContextDto,
+  PipelineContextDto,
   RetryInfoDto,
   RetryAction,
   RequirementDto,
@@ -13,7 +15,21 @@ import type {
   CreateRequirementRequest,
   WizardStatusDto,
   SubmitAnswersRequest,
-  CreateStoriesRequest
+  CreateStoriesRequest,
+  // Knowledge types
+  KnowledgeEntryDto,
+  SuccessfulPatternDto,
+  CommonErrorDto,
+  ProjectTemplateDto,
+  KnowledgeStatsDto,
+  PatternSearchResultDto,
+  ErrorMatchResultDto,
+  CreatePatternRequest,
+  CreateErrorRequest,
+  SearchKnowledgeRequest,
+  KnowledgeCategory,
+  PatternSubcategory,
+  ErrorType
 } from '../types';
 
 const API_BASE = '/api';
@@ -191,6 +207,16 @@ export const codebasesApi = {
     return response.text();
   },
 
+  getRequirementContext: async (id: string): Promise<RequirementContextDto> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/context/requirement`);
+    return handleResponse<RequirementContextDto>(response);
+  },
+
+  getPipelineContext: async (id: string): Promise<PipelineContextDto> => {
+    const response = await fetch(`${API_BASE}/codebases/${id}/context/pipeline`);
+    return handleResponse<PipelineContextDto>(response);
+  },
+
   getProjects: async (id: string): Promise<ProjectSummaryDto[]> => {
     const response = await fetch(`${API_BASE}/codebases/${id}/projects`);
     return handleResponse<ProjectSummaryDto[]>(response);
@@ -312,5 +338,162 @@ export const requirementsApi = {
   getStories: async (id: string): Promise<string[]> => {
     const response = await fetch(`${API_BASE}/requirements/${id}/stories`);
     return handleResponse<string[]>(response);
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// Knowledge Base API
+// ════════════════════════════════════════════════════════════════════════════
+
+export const knowledgeApi = {
+  // General CRUD
+  getAll: async (category?: KnowledgeCategory): Promise<KnowledgeEntryDto[]> => {
+    const params = category !== undefined ? `?category=${category}` : '';
+    const response = await fetch(`${API_BASE}/knowledge${params}`);
+    return handleResponse<KnowledgeEntryDto[]>(response);
+  },
+
+  getById: async (id: string): Promise<KnowledgeEntryDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}`);
+    return handleResponse<KnowledgeEntryDto>(response);
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  },
+
+  update: async (id: string, data: { title: string; description: string; tags: string[]; context?: string }): Promise<KnowledgeEntryDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return handleResponse<KnowledgeEntryDto>(response);
+  },
+
+  // Patterns
+  getPatterns: async (subcategory?: PatternSubcategory): Promise<SuccessfulPatternDto[]> => {
+    const params = subcategory !== undefined ? `?subcategory=${subcategory}` : '';
+    const response = await fetch(`${API_BASE}/knowledge/patterns${params}`);
+    return handleResponse<SuccessfulPatternDto[]>(response);
+  },
+
+  getPattern: async (id: string): Promise<SuccessfulPatternDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/patterns/${id}`);
+    return handleResponse<SuccessfulPatternDto>(response);
+  },
+
+  createPattern: async (request: CreatePatternRequest): Promise<SuccessfulPatternDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/patterns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<SuccessfulPatternDto>(response);
+  },
+
+  findSimilarPatterns: async (problemDescription: string, limit: number = 5): Promise<PatternSearchResultDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/patterns/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problemDescription, limit })
+    });
+    return handleResponse<PatternSearchResultDto>(response);
+  },
+
+  // Errors
+  getErrors: async (errorType?: ErrorType): Promise<CommonErrorDto[]> => {
+    const params = errorType !== undefined ? `?errorType=${errorType}` : '';
+    const response = await fetch(`${API_BASE}/knowledge/errors${params}`);
+    return handleResponse<CommonErrorDto[]>(response);
+  },
+
+  getError: async (id: string): Promise<CommonErrorDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/errors/${id}`);
+    return handleResponse<CommonErrorDto>(response);
+  },
+
+  createError: async (request: CreateErrorRequest): Promise<CommonErrorDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/errors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<CommonErrorDto>(response);
+  },
+
+  findMatchingError: async (errorMessage: string, errorType?: ErrorType): Promise<ErrorMatchResultDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/errors/match`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ errorMessage, errorType })
+    });
+    return handleResponse<ErrorMatchResultDto>(response);
+  },
+
+  // Templates
+  getTemplates: async (type?: string): Promise<ProjectTemplateDto[]> => {
+    const params = type ? `?type=${encodeURIComponent(type)}` : '';
+    const response = await fetch(`${API_BASE}/knowledge/templates${params}`);
+    return handleResponse<ProjectTemplateDto[]>(response);
+  },
+
+  getTemplate: async (id: string): Promise<ProjectTemplateDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/templates/${id}`);
+    return handleResponse<ProjectTemplateDto>(response);
+  },
+
+  // Search
+  search: async (request: SearchKnowledgeRequest): Promise<KnowledgeEntryDto[]> => {
+    const response = await fetch(`${API_BASE}/knowledge/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<KnowledgeEntryDto[]>(response);
+  },
+
+  getTags: async (): Promise<string[]> => {
+    const response = await fetch(`${API_BASE}/knowledge/tags`);
+    return handleResponse<string[]>(response);
+  },
+
+  // Usage tracking
+  recordUsage: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}/usage`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  },
+
+  updateSuccess: async (id: string, wasSuccessful: boolean): Promise<void> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}/success?wasSuccessful=${wasSuccessful}`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  },
+
+  verify: async (id: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/knowledge/${id}/verify`, {
+      method: 'POST'
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  },
+
+  // Statistics
+  getStats: async (): Promise<KnowledgeStatsDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/stats`);
+    return handleResponse<KnowledgeStatsDto>(response);
   }
 };

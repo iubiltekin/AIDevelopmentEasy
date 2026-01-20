@@ -8,6 +8,9 @@ import { Codebases } from './pages/Codebases';
 import { CodebaseDetail } from './pages/CodebaseDetail';
 import Requirements from './pages/Requirements';
 import RequirementDetail from './pages/RequirementDetail';
+import Knowledge from './pages/Knowledge';
+import KnowledgeDetail from './pages/KnowledgeDetail';
+import KnowledgeCreate from './pages/KnowledgeCreate';
 
 function App() {
   return (
@@ -21,6 +24,9 @@ function App() {
           <Route path="requirements/:id" element={<RequirementDetail />} />
           <Route path="codebases" element={<Codebases />} />
           <Route path="codebases/:id" element={<CodebaseDetail />} />
+          <Route path="knowledge" element={<Knowledge />} />
+          <Route path="knowledge/new/:type" element={<KnowledgeCreate />} />
+          <Route path="knowledge/:id" element={<KnowledgeDetail />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { FileCode, Settings, Wifi, WifiOff, Database, ClipboardList } from 'lucide-react';
+import { FileCode, Settings, Wifi, WifiOff, Database, ClipboardList, BookOpen } from 'lucide-react';
 import { useSignalR } from '../hooks/useSignalR';
 
 export function Layout() {
@@ -9,6 +9,7 @@ export function Layout() {
   const mainNavItems = [
     { path: '/requirements', label: 'Requirements', icon: ClipboardList },
     { path: '/', label: 'Stories', icon: FileCode },
+    { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
   ];
 
   const utilityNavItems = [

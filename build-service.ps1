@@ -129,6 +129,12 @@ mkdir "%DATA_DIR%\stories" 2>nul
 mkdir "%DATA_DIR%\output" 2>nul
 mkdir "%DATA_DIR%\prompts" 2>nul
 mkdir "%DATA_DIR%\codebases" 2>nul
+mkdir "%DATA_DIR%\requirements" 2>nul
+mkdir "%DATA_DIR%\knowledge-base" 2>nul
+mkdir "%DATA_DIR%\knowledge-base\patterns" 2>nul
+mkdir "%DATA_DIR%\knowledge-base\errors" 2>nul
+mkdir "%DATA_DIR%\knowledge-base\templates" 2>nul
+mkdir "%DATA_DIR%\knowledge-base\insights" 2>nul
 mkdir "%DATA_DIR%\logs" 2>nul
 
 :: Note: Prompts are managed via build-service.ps1 directly to ProgramData

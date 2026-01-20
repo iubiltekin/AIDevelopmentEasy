@@ -233,6 +233,41 @@ export interface ProjectSummaryDto {
   projectReferences: string[];
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Codebase Context Types (Two-Level LLM Optimization)
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface RequirementContextDto {
+  summaryText: string;
+  tokenEstimate: number;
+  projects: ProjectBriefDto[];
+  architecture: string[];
+  technologies: string[];
+  extensionPoints: ExtensionPointDto[];
+}
+
+export interface ProjectBriefDto {
+  name: string;
+  type: string;
+  purpose: string;
+  keyNamespaces: string[];
+}
+
+export interface ExtensionPointDto {
+  layer: string;
+  project: string;
+  namespace: string;
+  pattern?: string;
+}
+
+export interface PipelineContextDto {
+  fullContextText: string;
+  tokenEstimate: number;
+  projectCount: number;
+  classCount: number;
+  interfaceCount: number;
+}
+
 export function getCodebaseStatusLabel(status: CodebaseStatus): string {
   const labels: Record<CodebaseStatus, string> = {
     [CodebaseStatus.Pending]: 'Pending',
@@ -631,4 +666,242 @@ export function getStoryComplexityColor(complexity: StoryComplexity): string {
     [StoryComplexity.Large]: 'bg-red-500'
   };
   return colors[complexity] || 'bg-slate-500';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Knowledge Base Types
+// ════════════════════════════════════════════════════════════════════════════
+
+export enum KnowledgeCategory {
+  Pattern = 0,
+  Error = 1,
+  Template = 2,
+  AgentInsight = 3
+}
+
+export enum PatternSubcategory {
+  Logging = 0,
+  Repository = 1,
+  Validation = 2,
+  ErrorHandling = 3,
+  DependencyInjection = 4,
+  ApiDesign = 5,
+  Testing = 6,
+  Configuration = 7,
+  FileIO = 8,
+  Other = 9
+}
+
+export enum ErrorType {
+  Compilation = 0,
+  Runtime = 1,
+  TestFailure = 2,
+  Integration = 3,
+  Configuration = 4,
+  Dependency = 5
+}
+
+export interface KnowledgeEntryDto {
+  id: string;
+  category: KnowledgeCategory;
+  title: string;
+  description: string;
+  tags: string[];
+  language: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  usageCount: number;
+  successRate: number;
+  isVerified: boolean;
+  isManual: boolean;
+  sourceStoryId?: string;
+}
+
+export interface SuccessfulPatternDto extends KnowledgeEntryDto {
+  subcategory: PatternSubcategory;
+  problemDescription: string;
+  solutionCode: string;
+  applicableScenarios: string[];
+  exampleUsage?: string;
+  dependencies: string[];
+  relatedPatterns: string[];
+}
+
+export interface CommonErrorDto extends KnowledgeEntryDto {
+  errorType: ErrorType;
+  errorPattern: string;
+  errorMessage?: string;
+  rootCause: string;
+  fixDescription: string;
+  fixCode?: string;
+  occurrenceCount: number;
+  preventionTips: string[];
+}
+
+export interface ProjectTemplateDto extends KnowledgeEntryDto {
+  templateType: string;
+  targetFramework: string;
+  templateFiles: TemplateFileDto[];
+  packages: PackageInfoDto[];
+  setupInstructions?: string;
+}
+
+export interface TemplateFileDto {
+  path: string;
+  content: string;
+  isRequired: boolean;
+}
+
+export interface PackageInfoDto {
+  name: string;
+  version?: string;
+  isRequired: boolean;
+}
+
+export interface KnowledgeStatsDto {
+  totalEntries: number;
+  patternsCount: number;
+  errorsCount: number;
+  templatesCount: number;
+  insightsCount: number;
+  verifiedCount: number;
+  mostUsed: KnowledgeUsageStatDto[];
+  recentlyAdded: KnowledgeEntrySummaryDto[];
+  topTags: Record<string, number>;
+}
+
+export interface KnowledgeUsageStatDto {
+  id: string;
+  title: string;
+  category: KnowledgeCategory;
+  usageCount: number;
+  successRate: number;
+}
+
+export interface KnowledgeEntrySummaryDto {
+  id: string;
+  title: string;
+  category: KnowledgeCategory;
+  createdAt: string;
+  tags: string[];
+}
+
+export interface ErrorMatchResultDto {
+  found: boolean;
+  error?: CommonErrorDto;
+  matchScore: number;
+  matchedOn?: string;
+}
+
+export interface PatternSearchResultDto {
+  patterns: SuccessfulPatternDto[];
+  relevanceScores: Record<string, number>;
+}
+
+// Request types
+export interface CreatePatternRequest {
+  title: string;
+  problemDescription: string;
+  solutionCode: string;
+  subcategory: PatternSubcategory;
+  tags: string[];
+  language: string;
+  context?: string;
+  applicableScenarios: string[];
+  exampleUsage?: string;
+  dependencies: string[];
+}
+
+export interface CreateErrorRequest {
+  title: string;
+  errorType: ErrorType;
+  errorPattern: string;
+  errorMessage?: string;
+  rootCause: string;
+  fixDescription: string;
+  fixCode?: string;
+  tags: string[];
+  language: string;
+  preventionTips: string[];
+}
+
+export interface SearchKnowledgeRequest {
+  query?: string;
+  category?: KnowledgeCategory;
+  tags?: string[];
+  language?: string;
+  isVerified?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// Helper functions for Knowledge
+export function getKnowledgeCategoryLabel(category: KnowledgeCategory): string {
+  const labels: Record<KnowledgeCategory, string> = {
+    [KnowledgeCategory.Pattern]: 'Pattern',
+    [KnowledgeCategory.Error]: 'Error Fix',
+    [KnowledgeCategory.Template]: 'Template',
+    [KnowledgeCategory.AgentInsight]: 'Agent Insight'
+  };
+  return labels[category] || 'Unknown';
+}
+
+export function getKnowledgeCategoryColor(category: KnowledgeCategory): string {
+  const colors: Record<KnowledgeCategory, string> = {
+    [KnowledgeCategory.Pattern]: 'bg-blue-500',
+    [KnowledgeCategory.Error]: 'bg-red-500',
+    [KnowledgeCategory.Template]: 'bg-purple-500',
+    [KnowledgeCategory.AgentInsight]: 'bg-amber-500'
+  };
+  return colors[category] || 'bg-slate-500';
+}
+
+export function getKnowledgeCategoryIcon(category: KnowledgeCategory): string {
+  const icons: Record<KnowledgeCategory, string> = {
+    [KnowledgeCategory.Pattern]: '🧩',
+    [KnowledgeCategory.Error]: '🐛',
+    [KnowledgeCategory.Template]: '📋',
+    [KnowledgeCategory.AgentInsight]: '🤖'
+  };
+  return icons[category] || '📄';
+}
+
+export function getPatternSubcategoryLabel(subcategory: PatternSubcategory): string {
+  const labels: Record<PatternSubcategory, string> = {
+    [PatternSubcategory.Logging]: 'Logging',
+    [PatternSubcategory.Repository]: 'Repository',
+    [PatternSubcategory.Validation]: 'Validation',
+    [PatternSubcategory.ErrorHandling]: 'Error Handling',
+    [PatternSubcategory.DependencyInjection]: 'Dependency Injection',
+    [PatternSubcategory.ApiDesign]: 'API Design',
+    [PatternSubcategory.Testing]: 'Testing',
+    [PatternSubcategory.Configuration]: 'Configuration',
+    [PatternSubcategory.FileIO]: 'File I/O',
+    [PatternSubcategory.Other]: 'Other'
+  };
+  return labels[subcategory] || 'Unknown';
+}
+
+export function getErrorTypeLabel(errorType: ErrorType): string {
+  const labels: Record<ErrorType, string> = {
+    [ErrorType.Compilation]: 'Build Error',
+    [ErrorType.Runtime]: 'Runtime Error',
+    [ErrorType.TestFailure]: 'Test Failure',
+    [ErrorType.Integration]: 'Integration Error',
+    [ErrorType.Configuration]: 'Config Error',
+    [ErrorType.Dependency]: 'Dependency Error'
+  };
+  return labels[errorType] || 'Unknown';
+}
+
+export function getErrorTypeColor(errorType: ErrorType): string {
+  const colors: Record<ErrorType, string> = {
+    [ErrorType.Compilation]: 'bg-red-500',
+    [ErrorType.Runtime]: 'bg-orange-500',
+    [ErrorType.TestFailure]: 'bg-amber-500',
+    [ErrorType.Integration]: 'bg-purple-500',
+    [ErrorType.Configuration]: 'bg-cyan-500',
+    [ErrorType.Dependency]: 'bg-pink-500'
+  };
+  return colors[errorType] || 'bg-slate-500';
 }

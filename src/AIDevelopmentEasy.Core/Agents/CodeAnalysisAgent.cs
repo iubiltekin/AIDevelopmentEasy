@@ -87,10 +87,367 @@ public class CodeAnalysisAgent
         // Detect conventions
         analysis.Conventions = DetectConventions(analysis);
 
+        // Build two-level contexts for LLM optimization
+        analysis.RequirementContext = BuildRequirementContext(analysis);
+        analysis.PipelineContext = BuildPipelineContext(analysis);
+
         _logger?.LogInformation("[CodeAnalysis] Analysis complete: {Classes} classes, {Interfaces} interfaces",
             analysis.Summary.TotalClasses, analysis.Summary.TotalInterfaces);
+        _logger?.LogInformation("[CodeAnalysis] Context sizes: Requirement ~{ReqTokens} tokens, Pipeline ~{PipeTokens} tokens",
+            analysis.RequirementContext.TokenEstimate, analysis.PipelineContext.TokenEstimate);
 
         return analysis;
+    }
+
+    /// <summary>
+    /// Build lightweight context for Requirements Wizard
+    /// </summary>
+    private RequirementContext BuildRequirementContext(CodebaseAnalysis analysis)
+    {
+        var context = new RequirementContext();
+
+        // Build project briefs
+        foreach (var project in analysis.Projects)
+        {
+            var projectType = DetectProjectType(project);
+            var purpose = InferProjectPurpose(project, projectType);
+
+            context.Projects.Add(new ProjectBrief
+            {
+                Name = project.Name,
+                Type = projectType,
+                Purpose = purpose,
+                KeyNamespaces = project.Namespaces.Take(3).ToList()
+            });
+        }
+
+        // Detect architecture layers
+        context.Architecture = DetectArchitectureLayers(analysis);
+
+        // List key technologies
+        context.Technologies = DetectTechnologies(analysis);
+
+        // Find extension points
+        context.ExtensionPoints = FindExtensionPoints(analysis);
+
+        // Generate summary text
+        context.SummaryText = GenerateRequirementSummaryText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.SummaryText);
+
+        return context;
+    }
+
+    /// <summary>
+    /// Build full context for Pipeline operations
+    /// </summary>
+    private PipelineContext BuildPipelineContext(CodebaseAnalysis analysis)
+    {
+        var context = new PipelineContext();
+
+        foreach (var project in analysis.Projects.Where(p => !p.IsTestProject))
+        {
+            var detail = new ProjectDetail
+            {
+                Name = project.Name,
+                Path = project.RelativePath,
+                RootNamespace = project.RootNamespace
+            };
+
+            // Add interfaces
+            foreach (var iface in project.Interfaces.Take(50)) // Limit for token control
+            {
+                var methods = iface.Members
+                    .Where(m => m.Kind == "Method")
+                    .Select(m => $"{m.ReturnType} {m.Name}({string.Join(", ", m.Parameters)})")
+                    .Take(10)
+                    .ToList();
+
+                detail.Interfaces.Add(new InterfaceBrief
+                {
+                    Name = iface.Name,
+                    Namespace = iface.Namespace,
+                    Methods = methods
+                });
+            }
+
+            // Add classes
+            foreach (var cls in project.Classes.Take(100)) // Limit for token control
+            {
+                var publicMethods = cls.Members
+                    .Where(m => m.Kind == "Method" && m.Modifiers.Contains("public"))
+                    .Select(m => $"{m.ReturnType} {m.Name}({string.Join(", ", m.Parameters)})")
+                    .Take(10)
+                    .ToList();
+
+                detail.Classes.Add(new ClassBrief
+                {
+                    Name = cls.Name,
+                    Namespace = cls.Namespace,
+                    BaseTypes = cls.BaseTypes,
+                    Pattern = cls.DetectedPattern,
+                    PublicMethods = publicMethods
+                });
+            }
+
+            context.ProjectDetails.Add(detail);
+        }
+
+        // Generate full context text
+        context.FullContextText = GeneratePipelineContextText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.FullContextText);
+
+        return context;
+    }
+
+    private string DetectProjectType(ProjectInfo project)
+    {
+        if (project.IsTestProject) return "Tests";
+        if (project.Name.EndsWith(".Api") || project.Name.EndsWith(".Web") || 
+            project.DetectedPatterns.Contains("Controller")) return "API";
+        if (project.Name.EndsWith(".Core") || project.Name.EndsWith(".Domain")) return "Core";
+        if (project.Name.EndsWith(".Infrastructure") || project.Name.EndsWith(".Data")) return "Infrastructure";
+        if (project.OutputType == "Exe") return "Console";
+        return "Library";
+    }
+
+    private string InferProjectPurpose(ProjectInfo project, string projectType)
+    {
+        return projectType switch
+        {
+            "API" => "REST API endpoints and web interface",
+            "Core" => "Core business logic and domain models",
+            "Infrastructure" => "Data access and external integrations",
+            "Tests" => "Unit and integration tests",
+            "Console" => "Console application entry point",
+            "Library" => $"Shared library ({string.Join(", ", project.DetectedPatterns.Take(2))})",
+            _ => "General purpose"
+        };
+    }
+
+    private List<string> DetectArchitectureLayers(CodebaseAnalysis analysis)
+    {
+        var layers = new List<string>();
+
+        var patterns = analysis.Projects.SelectMany(p => p.DetectedPatterns).Distinct().ToList();
+
+        if (patterns.Any(p => p.Contains("Controller"))) layers.Add("Web/API Layer");
+        if (patterns.Any(p => p.Contains("Service"))) layers.Add("Service Layer");
+        if (patterns.Any(p => p.Contains("Repository"))) layers.Add("Repository/Data Layer");
+        if (patterns.Any(p => p.Contains("CQRS"))) layers.Add("CQRS Pattern");
+        if (patterns.Any(p => p.Contains("DependencyInjection"))) layers.Add("Dependency Injection");
+
+        if (layers.Count == 0) layers.Add("Monolithic Structure");
+
+        return layers;
+    }
+
+    private List<string> DetectTechnologies(CodebaseAnalysis analysis)
+    {
+        var tech = new HashSet<string>();
+
+        // From frameworks
+        foreach (var project in analysis.Projects)
+        {
+            if (!string.IsNullOrEmpty(project.TargetFramework))
+            {
+                if (project.TargetFramework.Contains("net8") || project.TargetFramework.Contains("net7") ||
+                    project.TargetFramework.Contains("net6"))
+                    tech.Add(".NET " + project.TargetFramework.Replace("net", ""));
+                else if (project.TargetFramework.Contains("netstandard"))
+                    tech.Add(".NET Standard");
+                else if (project.TargetFramework.Contains("v4"))
+                    tech.Add(".NET Framework");
+            }
+
+            // From packages
+            foreach (var pkg in project.PackageReferences)
+            {
+                if (pkg.Name.Contains("EntityFramework")) tech.Add("Entity Framework");
+                if (pkg.Name.Contains("Dapper")) tech.Add("Dapper");
+                if (pkg.Name.Contains("SignalR")) tech.Add("SignalR");
+                if (pkg.Name.Contains("Serilog")) tech.Add("Serilog");
+                if (pkg.Name.Contains("AutoMapper")) tech.Add("AutoMapper");
+                if (pkg.Name.Contains("FluentValidation")) tech.Add("FluentValidation");
+                if (pkg.Name.Contains("MediatR")) tech.Add("MediatR");
+                if (pkg.Name.Contains("Swagger") || pkg.Name.Contains("OpenApi")) tech.Add("OpenAPI/Swagger");
+            }
+        }
+
+        // From test frameworks
+        if (!string.IsNullOrEmpty(analysis.Conventions.TestFramework))
+            tech.Add(analysis.Conventions.TestFramework);
+
+        return tech.Take(10).ToList();
+    }
+
+    private List<ExtensionPoint> FindExtensionPoints(CodebaseAnalysis analysis)
+    {
+        var points = new List<ExtensionPoint>();
+
+        foreach (var project in analysis.Projects.Where(p => !p.IsTestProject))
+        {
+            // Find controller folders
+            if (project.Classes.Any(c => c.DetectedPattern == "Controller"))
+            {
+                var controllerNs = project.Classes
+                    .Where(c => c.DetectedPattern == "Controller")
+                    .Select(c => c.Namespace)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(controllerNs))
+                {
+                    points.Add(new ExtensionPoint
+                    {
+                        Layer = "Controllers",
+                        Project = project.Name,
+                        Namespace = controllerNs,
+                        Pattern = "Controller"
+                    });
+                }
+            }
+
+            // Find service folders
+            if (project.Classes.Any(c => c.DetectedPattern == "Service") ||
+                project.Interfaces.Any(i => i.Name.StartsWith("I") && i.Name.Contains("Service")))
+            {
+                var serviceNs = project.Classes
+                    .Where(c => c.DetectedPattern == "Service")
+                    .Select(c => c.Namespace)
+                    .FirstOrDefault() ?? project.Interfaces
+                    .Where(i => i.Name.Contains("Service"))
+                    .Select(i => i.Namespace)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(serviceNs))
+                {
+                    points.Add(new ExtensionPoint
+                    {
+                        Layer = "Services",
+                        Project = project.Name,
+                        Namespace = serviceNs,
+                        Pattern = "Service"
+                    });
+                }
+            }
+
+            // Find repository folders
+            if (project.Classes.Any(c => c.DetectedPattern == "Repository") ||
+                project.Interfaces.Any(i => i.Name.Contains("Repository")))
+            {
+                var repoNs = project.Classes
+                    .Where(c => c.DetectedPattern == "Repository")
+                    .Select(c => c.Namespace)
+                    .FirstOrDefault() ?? project.Interfaces
+                    .Where(i => i.Name.Contains("Repository"))
+                    .Select(i => i.Namespace)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(repoNs))
+                {
+                    points.Add(new ExtensionPoint
+                    {
+                        Layer = "Repositories",
+                        Project = project.Name,
+                        Namespace = repoNs,
+                        Pattern = "Repository"
+                    });
+                }
+            }
+        }
+
+        return points.Take(10).ToList();
+    }
+
+    private string GenerateRequirementSummaryText(RequirementContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine();
+
+        sb.AppendLine("## Architecture");
+        foreach (var layer in context.Architecture)
+            sb.AppendLine($"- {layer}");
+        sb.AppendLine();
+
+        sb.AppendLine("## Projects");
+        foreach (var project in context.Projects)
+        {
+            sb.AppendLine($"- **{project.Name}** ({project.Type}): {project.Purpose}");
+            if (project.KeyNamespaces.Any())
+                sb.AppendLine($"  Namespaces: {string.Join(", ", project.KeyNamespaces)}");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("## Technologies");
+        sb.AppendLine(string.Join(", ", context.Technologies));
+        sb.AppendLine();
+
+        if (context.ExtensionPoints.Any())
+        {
+            sb.AppendLine("## Extension Points (where to add new code)");
+            foreach (var ep in context.ExtensionPoints)
+            {
+                sb.AppendLine($"- {ep.Layer}: {ep.Project} → {ep.Namespace}");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private string GeneratePipelineContextText(PipelineContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine($"Framework: {analysis.Summary.PrimaryFramework}");
+        sb.AppendLine($"Patterns: {string.Join(", ", analysis.Summary.DetectedPatterns)}");
+        sb.AppendLine();
+
+        sb.AppendLine("## Conventions");
+        sb.AppendLine($"- Naming: {analysis.Conventions.NamingStyle}");
+        sb.AppendLine($"- Private field prefix: {analysis.Conventions.PrivateFieldPrefix}");
+        sb.AppendLine($"- Async suffix: {(analysis.Conventions.UsesAsyncSuffix ? "Yes" : "No")}");
+        sb.AppendLine();
+
+        foreach (var project in context.ProjectDetails)
+        {
+            sb.AppendLine($"## Project: {project.Name}");
+            sb.AppendLine($"Namespace: {project.RootNamespace}");
+            sb.AppendLine();
+
+            if (project.Interfaces.Any())
+            {
+                sb.AppendLine("### Interfaces");
+                foreach (var iface in project.Interfaces.Take(20))
+                {
+                    sb.AppendLine($"- {iface.Namespace}.{iface.Name}");
+                    foreach (var method in iface.Methods.Take(5))
+                        sb.AppendLine($"    {method}");
+                }
+                sb.AppendLine();
+            }
+
+            if (project.Classes.Any())
+            {
+                sb.AppendLine("### Classes");
+                foreach (var cls in project.Classes.Take(30))
+                {
+                    var baseInfo = cls.BaseTypes.Any() ? $" : {string.Join(", ", cls.BaseTypes)}" : "";
+                    var patternInfo = !string.IsNullOrEmpty(cls.Pattern) ? $" [{cls.Pattern}]" : "";
+                    sb.AppendLine($"- {cls.Namespace}.{cls.Name}{baseInfo}{patternInfo}");
+                }
+                sb.AppendLine();
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private int EstimateTokens(string text)
+    {
+        // Rough estimate: ~4 characters per token for code/technical text
+        return text.Length / 4;
     }
 
     private async Task<SolutionInfo> ParseSolutionFileAsync(string slnPath, string basePath)

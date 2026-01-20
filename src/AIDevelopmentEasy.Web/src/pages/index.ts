@@ -6,3 +6,6 @@ export { Codebases } from './Codebases';
 export { CodebaseDetail } from './CodebaseDetail';
 export { default as Requirements } from './Requirements';
 export { default as RequirementDetail } from './RequirementDetail';
+export { default as Knowledge } from './Knowledge';
+export { default as KnowledgeDetail } from './KnowledgeDetail';
+export { default as KnowledgeCreate } from './KnowledgeCreate';

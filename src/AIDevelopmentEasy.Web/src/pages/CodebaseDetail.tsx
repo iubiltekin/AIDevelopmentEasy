@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, FolderCode, FileCode, Layers, Copy, Check } from 'lucide-react';
+import { ArrowLeft, RefreshCw, FolderCode, FileCode, Layers, Copy, Check, Zap, Database, Server, AlertCircle } from 'lucide-react';
 import { codebasesApi } from '../services/api';
-import { CodebaseDto, ProjectSummaryDto, CodebaseStatus, getCodebaseStatusLabel, getCodebaseStatusColor } from '../types';
+import { 
+  CodebaseDto, 
+  ProjectSummaryDto, 
+  CodebaseStatus, 
+  getCodebaseStatusLabel, 
+  getCodebaseStatusColor,
+  RequirementContextDto,
+  PipelineContextDto
+} from '../types';
+
+type TabType = 'overview' | 'projects' | 'requirement-context' | 'pipeline-context';
 
 export function CodebaseDetail() {
   const { id } = useParams<{ id: string }>();
   const [codebase, setCodebase] = useState<CodebaseDto | null>(null);
   const [projects, setProjects] = useState<ProjectSummaryDto[]>([]);
-  const [context, setContext] = useState<string>('');
+  const [requirementContext, setRequirementContext] = useState<RequirementContextDto | null>(null);
+  const [pipelineContext, setPipelineContext] = useState<PipelineContextDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'context'>('overview');
-  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [copiedReq, setCopiedReq] = useState(false);
+  const [copiedPipe, setCopiedPipe] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -29,8 +41,12 @@ export function CodebaseDetail() {
         setProjects(projs);
 
         if (cb.status === CodebaseStatus.Ready) {
-          const ctx = await codebasesApi.getContext(id).catch(() => '');
-          setContext(ctx);
+          const [reqCtx, pipeCtx] = await Promise.all([
+            codebasesApi.getRequirementContext(id).catch(() => null),
+            codebasesApi.getPipelineContext(id).catch(() => null)
+          ]);
+          setRequirementContext(reqCtx);
+          setPipelineContext(pipeCtx);
         }
 
         setError(null);
@@ -44,10 +60,15 @@ export function CodebaseDetail() {
     load();
   }, [id]);
 
-  const handleCopyContext = async () => {
-    await navigator.clipboard.writeText(context);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async (text: string, type: 'req' | 'pipe') => {
+    await navigator.clipboard.writeText(text);
+    if (type === 'req') {
+      setCopiedReq(true);
+      setTimeout(() => setCopiedReq(false), 2000);
+    } else {
+      setCopiedPipe(true);
+      setTimeout(() => setCopiedPipe(false), 2000);
+    }
   };
 
   if (loading) {
@@ -67,6 +88,13 @@ export function CodebaseDetail() {
       </div>
     );
   }
+
+  const tabs: { key: TabType; label: string; icon?: React.ReactNode }[] = [
+    { key: 'overview', label: 'Overview', icon: <Layers className="w-4 h-4" /> },
+    { key: 'projects', label: 'Projects', icon: <FileCode className="w-4 h-4" /> },
+    { key: 'requirement-context', label: 'Requirement Context', icon: <Zap className="w-4 h-4" /> },
+    { key: 'pipeline-context', label: 'Pipeline Context', icon: <Database className="w-4 h-4" /> },
+  ];
 
   return (
     <div className="p-8">
@@ -93,14 +121,15 @@ export function CodebaseDetail() {
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400">
+        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center gap-2">
+          <AlertCircle className="w-5 h-5" />
           {error}
         </div>
       )}
 
       {/* Summary Cards */}
       {codebase.summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-white">{codebase.summary.totalSolutions}</div>
             <div className="text-sm text-slate-400">Solutions</div>
@@ -118,25 +147,30 @@ export function CodebaseDetail() {
             <div className="text-sm text-slate-400">Interfaces</div>
           </div>
           <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-4 text-center">
-            <div className="text-lg font-bold text-amber-400 truncate">{codebase.summary.primaryFramework}</div>
-            <div className="text-sm text-slate-400">Framework</div>
+            <div className="text-lg font-bold text-amber-400">~{requirementContext?.tokenEstimate || 0}</div>
+            <div className="text-sm text-slate-400">Req Tokens</div>
+          </div>
+          <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-4 text-center">
+            <div className="text-lg font-bold text-purple-400">~{pipelineContext?.tokenEstimate || 0}</div>
+            <div className="text-sm text-slate-400">Pipeline Tokens</div>
           </div>
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
-        {['overview', 'projects', 'context'].map(tab => (
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {tabs.map(tab => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab as typeof activeTab)}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === tab
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+              activeTab === tab.key
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-800 text-slate-400 hover:text-white'
             }`}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab.icon}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -175,6 +209,34 @@ export function CodebaseDetail() {
                 )}
               </div>
             </div>
+
+            {/* Technologies */}
+            {requirementContext?.technologies && requirementContext.technologies.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-4">Technologies</h3>
+                <div className="flex flex-wrap gap-2">
+                  {requirementContext.technologies.map((tech, i) => (
+                    <span key={i} className="px-3 py-1 bg-purple-900/50 text-purple-300 rounded-lg text-sm">
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Architecture */}
+            {requirementContext?.architecture && requirementContext.architecture.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-4">Architecture</h3>
+                <div className="flex flex-wrap gap-2">
+                  {requirementContext.architecture.map((layer, i) => (
+                    <span key={i} className="px-3 py-1 bg-emerald-900/50 text-emerald-300 rounded-lg text-sm">
+                      {layer}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <h3 className="text-lg font-semibold text-white mb-4">Timestamps</h3>
@@ -268,26 +330,166 @@ export function CodebaseDetail() {
           </div>
         )}
 
-        {activeTab === 'context' && (
+        {activeTab === 'requirement-context' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">
-                Context for Prompts
-              </h3>
-              <button
-                onClick={handleCopyContext}
-                className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
-              >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  Requirement Context
+                  <span className="text-sm font-normal text-slate-400 ml-2">
+                    (Lightweight - ~{requirementContext?.tokenEstimate || 0} tokens)
+                  </span>
+                </h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Used by Requirements Wizard for understanding project structure without detailed code
+                </p>
+              </div>
+              {requirementContext?.summaryText && (
+                <button
+                  onClick={() => handleCopy(requirementContext.summaryText, 'req')}
+                  className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                >
+                  {copiedReq ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copiedReq ? 'Copied!' : 'Copy'}
+                </button>
+              )}
             </div>
-            <p className="text-sm text-slate-400 mb-4">
-              This context string can be used in prompts to help the AI understand your codebase structure.
-            </p>
-            <pre className="bg-slate-900 p-4 rounded-lg overflow-x-auto text-sm text-slate-300 whitespace-pre-wrap font-mono">
-              {context || 'Context not available. Make sure analysis is complete.'}
-            </pre>
+
+            {requirementContext ? (
+              <div className="space-y-6">
+                {/* Projects Summary */}
+                {requirementContext.projects.length > 0 && (
+                  <div>
+                    <h4 className="text-md font-medium text-white mb-3">Projects</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {requirementContext.projects.map((proj, i) => (
+                        <div key={i} className="p-3 bg-slate-900 rounded-lg border border-slate-700">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Server className="w-4 h-4 text-blue-400" />
+                            <span className="font-medium text-white">{proj.name}</span>
+                            <span className="px-2 py-0.5 bg-slate-700 text-slate-300 rounded text-xs">{proj.type}</span>
+                          </div>
+                          <p className="text-sm text-slate-400">{proj.purpose}</p>
+                          {proj.keyNamespaces.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {proj.keyNamespaces.map((ns, j) => (
+                                <span key={j} className="text-xs font-mono text-slate-500">{ns}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extension Points */}
+                {requirementContext.extensionPoints.length > 0 && (
+                  <div>
+                    <h4 className="text-md font-medium text-white mb-3">Extension Points (Where to add new code)</h4>
+                    <div className="space-y-2">
+                      {requirementContext.extensionPoints.map((ep, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2 bg-slate-900 rounded">
+                          <span className="px-2 py-0.5 bg-emerald-600/20 text-emerald-400 rounded text-sm">{ep.layer}</span>
+                          <span className="text-white">{ep.project}</span>
+                          <span className="text-slate-500">→</span>
+                          <span className="font-mono text-sm text-slate-400">{ep.namespace}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Raw Text */}
+                <div>
+                  <h4 className="text-md font-medium text-white mb-3">Raw Context (for LLM)</h4>
+                  <pre className="bg-slate-900 p-4 rounded-lg overflow-x-auto text-sm text-slate-300 whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                    {requirementContext.summaryText || 'Context not available'}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-400">
+                Requirement context not available. Make sure analysis is complete.
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'pipeline-context' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Database className="w-5 h-5 text-purple-400" />
+                  Pipeline Context
+                  <span className="text-sm font-normal text-slate-400 ml-2">
+                    (Detailed - ~{pipelineContext?.tokenEstimate || 0} tokens)
+                  </span>
+                </h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Used by Pipeline for code generation with detailed class/interface information
+                </p>
+              </div>
+              {pipelineContext?.fullContextText && (
+                <button
+                  onClick={() => handleCopy(pipelineContext.fullContextText, 'pipe')}
+                  className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors"
+                >
+                  {copiedPipe ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copiedPipe ? 'Copied!' : 'Copy'}
+                </button>
+              )}
+            </div>
+
+            {pipelineContext ? (
+              <div className="space-y-6">
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-4 bg-slate-900 rounded-lg">
+                    <div className="text-2xl font-bold text-white">{pipelineContext.projectCount}</div>
+                    <div className="text-sm text-slate-400">Projects</div>
+                  </div>
+                  <div className="text-center p-4 bg-slate-900 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-400">{pipelineContext.classCount}</div>
+                    <div className="text-sm text-slate-400">Classes</div>
+                  </div>
+                  <div className="text-center p-4 bg-slate-900 rounded-lg">
+                    <div className="text-2xl font-bold text-emerald-400">{pipelineContext.interfaceCount}</div>
+                    <div className="text-sm text-slate-400">Interfaces</div>
+                  </div>
+                </div>
+
+                {/* Token Comparison */}
+                <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-5 h-5 text-amber-400" />
+                    <span className="font-medium text-amber-300">Token Optimization</span>
+                  </div>
+                  <p className="text-sm text-slate-300">
+                    Pipeline context is <strong className="text-amber-400">
+                      {pipelineContext.tokenEstimate > 0 && requirementContext?.tokenEstimate 
+                        ? Math.round(pipelineContext.tokenEstimate / requirementContext.tokenEstimate) 
+                        : '?'}×
+                    </strong> larger than requirement context. 
+                    Requirements Wizard uses the lightweight version to save costs.
+                  </p>
+                </div>
+
+                {/* Raw Text */}
+                <div>
+                  <h4 className="text-md font-medium text-white mb-3">Raw Context (for LLM)</h4>
+                  <pre className="bg-slate-900 p-4 rounded-lg overflow-x-auto text-sm text-slate-300 whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                    {pipelineContext.fullContextText || 'Context not available'}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-400">
+                Pipeline context not available. Make sure analysis is complete.
+              </div>
+            )}
           </div>
         )}
       </div>

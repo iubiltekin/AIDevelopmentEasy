@@ -27,6 +27,181 @@ public class CodebaseAnalysis
 
     [JsonPropertyName("conventions")]
     public CodeConventions Conventions { get; set; } = new();
+
+    /// <summary>
+    /// Lightweight context for Requirements Wizard (smaller token count)
+    /// Contains only high-level structure: projects, namespaces, patterns
+    /// </summary>
+    [JsonPropertyName("requirement_context")]
+    public RequirementContext RequirementContext { get; set; } = new();
+
+    /// <summary>
+    /// Full context for Pipeline/Deployment (detailed)
+    /// Contains classes, interfaces, methods for code generation
+    /// </summary>
+    [JsonPropertyName("pipeline_context")]
+    public PipelineContext PipelineContext { get; set; } = new();
+}
+
+/// <summary>
+/// Lightweight context for Requirements Wizard
+/// Designed to minimize LLM token usage while providing essential structure info
+/// </summary>
+public class RequirementContext
+{
+    /// <summary>
+    /// Human-readable summary text (for LLM prompt injection)
+    /// </summary>
+    [JsonPropertyName("summary_text")]
+    public string SummaryText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Estimated token count
+    /// </summary>
+    [JsonPropertyName("token_estimate")]
+    public int TokenEstimate { get; set; }
+
+    /// <summary>
+    /// Project names and their types
+    /// </summary>
+    [JsonPropertyName("projects")]
+    public List<ProjectBrief> Projects { get; set; } = new();
+
+    /// <summary>
+    /// Main architectural layers/patterns
+    /// </summary>
+    [JsonPropertyName("architecture")]
+    public List<string> Architecture { get; set; } = new();
+
+    /// <summary>
+    /// Key technologies and frameworks
+    /// </summary>
+    [JsonPropertyName("technologies")]
+    public List<string> Technologies { get; set; } = new();
+
+    /// <summary>
+    /// Where new features typically go
+    /// </summary>
+    [JsonPropertyName("extension_points")]
+    public List<ExtensionPoint> ExtensionPoints { get; set; } = new();
+}
+
+/// <summary>
+/// Brief project info for requirement context
+/// </summary>
+public class ProjectBrief
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty; // API, Library, Tests, Console
+
+    [JsonPropertyName("purpose")]
+    public string Purpose { get; set; } = string.Empty;
+
+    [JsonPropertyName("key_namespaces")]
+    public List<string> KeyNamespaces { get; set; } = new();
+}
+
+/// <summary>
+/// Where new code can be added
+/// </summary>
+public class ExtensionPoint
+{
+    [JsonPropertyName("layer")]
+    public string Layer { get; set; } = string.Empty; // Controllers, Services, Repositories
+
+    [JsonPropertyName("project")]
+    public string Project { get; set; } = string.Empty;
+
+    [JsonPropertyName("namespace")]
+    public string Namespace { get; set; } = string.Empty;
+
+    [JsonPropertyName("pattern")]
+    public string? Pattern { get; set; } // Repository, Service, Controller
+}
+
+/// <summary>
+/// Full context for Pipeline operations
+/// Contains detailed class/interface information for code generation
+/// </summary>
+public class PipelineContext
+{
+    /// <summary>
+    /// Full context text (for LLM prompt injection)
+    /// </summary>
+    [JsonPropertyName("full_context_text")]
+    public string FullContextText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Estimated token count
+    /// </summary>
+    [JsonPropertyName("token_estimate")]
+    public int TokenEstimate { get; set; }
+
+    /// <summary>
+    /// Detailed project information with classes
+    /// </summary>
+    [JsonPropertyName("project_details")]
+    public List<ProjectDetail> ProjectDetails { get; set; } = new();
+}
+
+/// <summary>
+/// Detailed project info for pipeline context
+/// </summary>
+public class ProjectDetail
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    [JsonPropertyName("namespace")]
+    public string RootNamespace { get; set; } = string.Empty;
+
+    [JsonPropertyName("interfaces")]
+    public List<InterfaceBrief> Interfaces { get; set; } = new();
+
+    [JsonPropertyName("classes")]
+    public List<ClassBrief> Classes { get; set; } = new();
+}
+
+/// <summary>
+/// Brief interface info
+/// </summary>
+public class InterfaceBrief
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("namespace")]
+    public string Namespace { get; set; } = string.Empty;
+
+    [JsonPropertyName("methods")]
+    public List<string> Methods { get; set; } = new(); // Method signatures
+}
+
+/// <summary>
+/// Brief class info
+/// </summary>
+public class ClassBrief
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("namespace")]
+    public string Namespace { get; set; } = string.Empty;
+
+    [JsonPropertyName("base_types")]
+    public List<string> BaseTypes { get; set; } = new();
+
+    [JsonPropertyName("pattern")]
+    public string? Pattern { get; set; }
+
+    [JsonPropertyName("public_methods")]
+    public List<string> PublicMethods { get; set; } = new();
 }
 
 /// <summary>
