@@ -92,9 +92,9 @@ PromptLoader.Initialize(promptsPath);
 // ════════════════════════════════════════════════════════════════════════════
 // Azure OpenAI Configuration
 // ════════════════════════════════════════════════════════════════════════════
-var azureEndpoint = builder.Configuration["AzureOpenAI:Endpoint"] 
+var azureEndpoint = builder.Configuration["AzureOpenAI:Endpoint"]
     ?? throw new InvalidOperationException("AzureOpenAI:Endpoint not configured");
-var azureApiKey = builder.Configuration["AzureOpenAI:ApiKey"] 
+var azureApiKey = builder.Configuration["AzureOpenAI:ApiKey"]
     ?? throw new InvalidOperationException("AzureOpenAI:ApiKey not configured");
 var deploymentName = builder.Configuration["AzureOpenAI:DeploymentName"] ?? "gpt-4o";
 var targetLanguage = builder.Configuration["AIDevelopmentEasy:TargetLanguage"] ?? "csharp";
@@ -163,11 +163,23 @@ builder.Services.AddSingleton<IRequirementRepository>(sp =>
 builder.Services.AddSingleton<IKnowledgeRepository>(sp =>
     new FileSystemKnowledgeRepository(knowledgeBasePath, sp.GetRequiredService<ILogger<FileSystemKnowledgeRepository>>()));
 
+// Codebase analysis (multi-language: C#, Go, Rust, Python, React/TypeScript)
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer, AIDevelopmentEasy.Core.Analysis.CSharp.CSharpCodebaseAnalyzer>();
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer, AIDevelopmentEasy.Core.Analysis.Go.GoCodebaseAnalyzer>();
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer, AIDevelopmentEasy.Core.Analysis.Rust.RustCodebaseAnalyzer>();
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer, AIDevelopmentEasy.Core.Analysis.Python.PythonCodebaseAnalyzer>();
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer, AIDevelopmentEasy.Core.Analysis.Frontend.FrontendCodebaseAnalyzer>();
+builder.Services.AddSingleton<AIDevelopmentEasy.Core.Analysis.CodebaseAnalyzerFactory>(sp =>
+    new AIDevelopmentEasy.Core.Analysis.CodebaseAnalyzerFactory(
+        sp.GetServices<AIDevelopmentEasy.Core.Analysis.ICodebaseAnalyzer>(),
+        sp.GetService<ILogger<AIDevelopmentEasy.Core.Analysis.CodebaseAnalyzerFactory>>()));
+builder.Services.AddSingleton(sp =>
+    new CodeAnalysisAgent(
+        sp.GetRequiredService<AIDevelopmentEasy.Core.Analysis.CodebaseAnalyzerFactory>(),
+        sp.GetRequiredService<ILogger<CodeAnalysisAgent>>()));
 // Agents
 builder.Services.AddSingleton(sp =>
-    new CodeAnalysisAgent(sp.GetRequiredService<ILogger<CodeAnalysisAgent>>()));
-builder.Services.AddSingleton(sp =>
-    new PlannerAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<PlannerAgent>>()));
+    new PlannerAgent(openAIClient, deploymentName, sp.GetRequiredService<CodeAnalysisAgent>(), sp.GetRequiredService<ILogger<PlannerAgent>>()));
 
 builder.Services.AddSingleton(sp =>
     new CoderAgent(openAIClient, deploymentName, targetLanguage, sp.GetRequiredService<ILogger<CoderAgent>>()));
@@ -329,7 +341,7 @@ public static class WindowsServiceHelpers
     {
         if (!OperatingSystem.IsWindows())
             return false;
-            
+
         // Check if parent process is services.exe
         try
         {

@@ -36,7 +36,8 @@ if (-not $SkipReactBuild) {
     
     Pop-Location
     Write-Host "[OK] React UI built successfully!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "[1/6] Skipping React build (-SkipReactBuild)" -ForegroundColor Gray
 }
 
@@ -72,7 +73,8 @@ if (Test-Path $reactDist) {
     }
     Copy-Item $reactDist $wwwroot -Recurse
     Write-Host "[OK] React UI copied to wwwroot!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "[WARN] React dist folder not found. Run without -SkipReactBuild" -ForegroundColor Yellow
 }
 
@@ -81,20 +83,29 @@ Write-Host ""
 Write-Host "[4/6] Copying prompts to ProgramData..." -ForegroundColor Yellow
 $promptsSrc = "prompts"
 if (Test-Path $promptsSrc) {
-    # Copy directly to ProgramData - this is where the app reads from
     $programDataDir = "$env:ProgramData\AIDevelopmentEasy"
     $programDataPrompts = "$programDataDir\prompts"
-    
-    if (-not (Test-Path $programDataDir)) {
-        New-Item -ItemType Directory -Path $programDataDir -Force | Out-Null
+    try {
+        if (-not (Test-Path $programDataDir)) {
+            New-Item -ItemType Directory -Path $programDataDir -Force | Out-Null
+        }
+        if (-not (Test-Path $programDataPrompts)) {
+            New-Item -ItemType Directory -Path $programDataPrompts -Force | Out-Null
+        }
+        Get-ChildItem -Path $promptsSrc -Recurse -File | ForEach-Object {
+            $dest = $_.FullName.Replace((Resolve-Path $promptsSrc).Path, $programDataPrompts)
+            $destDir = Split-Path $dest -Parent
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+            Copy-Item $_.FullName -Destination $dest -Force
+        }
+        Write-Host "[OK] Prompts copied to: $programDataPrompts" -ForegroundColor Green
     }
-    if (Test-Path $programDataPrompts) {
-        Remove-Item $programDataPrompts -Recurse -Force
+    catch {
+        Write-Host "[WARN] Could not copy prompts to ProgramData (run as Administrator if needed): $_" -ForegroundColor Yellow
+        Write-Host "       Service will use existing prompts in $programDataPrompts if present." -ForegroundColor Gray
     }
-    Copy-Item $promptsSrc $programDataPrompts -Recurse -Force
-    
-    Write-Host "[OK] Prompts copied to: $programDataPrompts" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "[WARN] Prompts folder not found at: $promptsSrc" -ForegroundColor Yellow
 }
 

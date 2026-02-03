@@ -28,7 +28,7 @@ export function Codebases() {
 
   useEffect(() => {
     fetchCodebases();
-    
+
     // Poll for status updates while analyzing
     const interval = setInterval(() => {
       const analyzing = codebases.some(c => c.status === CodebaseStatus.Analyzing);
@@ -69,7 +69,7 @@ export function Codebases() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this codebase? This will not delete the actual files.')) return;
-    
+
     try {
       await codebasesApi.delete(id);
       fetchCodebases();
@@ -200,24 +200,35 @@ export function Codebases() {
               </div>
 
               {codebase.summary && (
-                <div className="grid grid-cols-4 gap-4 mb-4">
-                  <div className="text-center p-3 bg-slate-900 rounded-lg">
-                    <div className="text-2xl font-bold text-white">{codebase.summary.totalProjects}</div>
-                    <div className="text-xs text-slate-400">Projects</div>
+                <>
+                  <div className="grid grid-cols-4 gap-4 mb-4">
+                    <div className="text-center p-3 bg-slate-900 rounded-lg">
+                      <div className="text-2xl font-bold text-white">{codebase.summary.totalProjects}</div>
+                      <div className="text-xs text-slate-400">Projects</div>
+                    </div>
+                    <div className="text-center p-3 bg-slate-900 rounded-lg">
+                      <div className="text-2xl font-bold text-white">{codebase.summary.totalClasses}</div>
+                      <div className="text-xs text-slate-400">Classes</div>
+                    </div>
+                    <div className="text-center p-3 bg-slate-900 rounded-lg">
+                      <div className="text-2xl font-bold text-white">{codebase.summary.totalInterfaces}</div>
+                      <div className="text-xs text-slate-400">Interfaces</div>
+                    </div>
+                    <div className="text-center p-3 bg-slate-900 rounded-lg">
+                      <div className="text-sm font-medium text-blue-400 truncate">{codebase.summary.primaryFramework}</div>
+                      <div className="text-xs text-slate-400">Framework</div>
+                    </div>
                   </div>
-                  <div className="text-center p-3 bg-slate-900 rounded-lg">
-                    <div className="text-2xl font-bold text-white">{codebase.summary.totalClasses}</div>
-                    <div className="text-xs text-slate-400">Classes</div>
-                  </div>
-                  <div className="text-center p-3 bg-slate-900 rounded-lg">
-                    <div className="text-2xl font-bold text-white">{codebase.summary.totalInterfaces}</div>
-                    <div className="text-xs text-slate-400">Interfaces</div>
-                  </div>
-                  <div className="text-center p-3 bg-slate-900 rounded-lg">
-                    <div className="text-sm font-medium text-blue-400 truncate">{codebase.summary.primaryFramework}</div>
-                    <div className="text-xs text-slate-400">Framework</div>
-                  </div>
-                </div>
+                  {codebase.summary.languages && codebase.summary.languages.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {codebase.summary.languages.map((lang, i) => (
+                        <span key={i} className="px-2 py-1 bg-emerald-900/40 text-emerald-300 rounded text-xs font-medium capitalize">
+                          {lang}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
               {codebase.summary?.detectedPatterns && codebase.summary.detectedPatterns.length > 0 && (

@@ -278,6 +278,26 @@ public class ProjectInfo
     public List<string> DetectedPatterns { get; set; } = new();
 
     /// <summary>
+    /// Language of this project (e.g. "csharp", "go", "rust", "typescript").
+    /// Set by the analyzer that produced this project.
+    /// </summary>
+    [JsonPropertyName("language_id")]
+    public string LanguageId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Role of this project: "Backend", "Frontend", "Shared", or empty.
+    /// </summary>
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Root path of this project relative to codebase (e.g. "backend", "frontend", "").
+    /// Used for build/test commands.
+    /// </summary>
+    [JsonPropertyName("root_path")]
+    public string RootPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Is this a test project?
     /// </summary>
     [JsonIgnore]
@@ -370,6 +390,12 @@ public class CodebaseSummary
 
     [JsonPropertyName("detected_patterns")]
     public List<string> DetectedPatterns { get; set; } = new();
+
+    /// <summary>
+    /// Languages detected in this codebase (e.g. ["csharp"], ["go", "typescript"]).
+    /// </summary>
+    [JsonPropertyName("languages")]
+    public List<string> Languages { get; set; } = new();
 
     [JsonPropertyName("key_namespaces")]
     public List<string> KeyNamespaces { get; set; } = new();

@@ -242,6 +242,8 @@ public class CodebaseSummaryDto
     public string PrimaryFramework { get; set; } = string.Empty;
     public List<string> DetectedPatterns { get; set; } = new();
     public List<string> KeyNamespaces { get; set; } = new();
+    /// <summary>Languages detected in the codebase (e.g. csharp, go, typescript).</summary>
+    public List<string> Languages { get; set; } = new();
 }
 
 /// <summary>

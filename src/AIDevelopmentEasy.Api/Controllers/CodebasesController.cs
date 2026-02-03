@@ -221,12 +221,31 @@ public class CodebasesController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(string id, CancellationToken cancellationToken)
     {
-        var deleted = await _codebaseRepository.DeleteAsync(id, cancellationToken);
+        try
+        {
+            var deleted = await _codebaseRepository.DeleteAsync(id, cancellationToken);
 
-        if (!deleted)
-            return NotFound();
+            if (!deleted)
+                return NotFound();
 
-        return NoContent();
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Delete forbidden for codebase: {Id}", id);
+            return Problem(
+                detail: "Silme yetkisi yok. Uygulamayı yönetici olarak çalıştırmayı deneyin veya ProgramData klasörünün izinlerini kontrol edin.",
+                statusCode: 403,
+                title: "Silme başarısız");
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Delete IO error for codebase: {Id}", id);
+            return Problem(
+                detail: "Dosya veya klasör kullanımda olabilir. Uygulamayı kapatıp tekrar deneyin veya bilgisayarı yeniden başlatın.",
+                statusCode: 409,
+                title: "Silme başarısız");
+        }
     }
 
     /// <summary>
@@ -249,7 +268,10 @@ public class CodebasesController : ControllerBase
             ClassCount = p.Classes.Count,
             InterfaceCount = p.Interfaces.Count,
             DetectedPatterns = p.DetectedPatterns,
-            ProjectReferences = p.ProjectReferences
+            ProjectReferences = p.ProjectReferences,
+            LanguageId = p.LanguageId ?? string.Empty,
+            Role = p.Role ?? string.Empty,
+            RootPath = p.RootPath ?? string.Empty
         });
 
         return Ok(projects);
@@ -265,9 +287,9 @@ public class CodebasesController : ControllerBase
         if (analysis == null)
             return NotFound("Analysis not available");
 
-        var project = analysis.Projects.FirstOrDefault(p => 
+        var project = analysis.Projects.FirstOrDefault(p =>
             p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
-        
+
         if (project == null)
             return NotFound($"Project '{projectName}' not found");
 
@@ -299,9 +321,9 @@ public class CodebasesController : ControllerBase
         if (analysis == null)
             return NotFound("Analysis not available");
 
-        var project = analysis.Projects.FirstOrDefault(p => 
+        var project = analysis.Projects.FirstOrDefault(p =>
             p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
-        
+
         if (project == null)
             return NotFound($"Project '{projectName}' not found");
 
@@ -332,15 +354,15 @@ public class CodebasesController : ControllerBase
         if (analysis == null)
             return NotFound("Analysis not available");
 
-        var project = analysis.Projects.FirstOrDefault(p => 
+        var project = analysis.Projects.FirstOrDefault(p =>
             p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
-        
+
         if (project == null)
             return NotFound($"Project '{projectName}' not found");
 
-        var classInfo = project.Classes.FirstOrDefault(c => 
+        var classInfo = project.Classes.FirstOrDefault(c =>
             c.Name.Equals(className, StringComparison.OrdinalIgnoreCase));
-        
+
         if (classInfo == null)
             return NotFound($"Class '{className}' not found in project '{projectName}'");
 
@@ -414,6 +436,12 @@ public class ProjectSummaryDto
     public int InterfaceCount { get; set; }
     public List<string> DetectedPatterns { get; set; } = new();
     public List<string> ProjectReferences { get; set; } = new();
+    /// <summary>Language of this project (e.g. csharp, go, typescript).</summary>
+    public string LanguageId { get; set; } = string.Empty;
+    /// <summary>Role: Backend, Frontend, or empty.</summary>
+    public string Role { get; set; } = string.Empty;
+    /// <summary>Root path of project relative to codebase.</summary>
+    public string RootPath { get; set; } = string.Empty;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,230 @@
+using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Core.Models;
+using Microsoft.Extensions.Logging;
+
+namespace AIDevelopmentEasy.Core.Analysis.Python;
+
+/// <summary>
+/// Analyzes Python codebases (pyproject.toml, setup.py, requirements.txt, *.py) and produces a
+/// <see cref="CodebaseAnalysis"/> with <see cref="ProjectInfo.LanguageId"/> = "python".
+/// </summary>
+public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
+{
+    public string LanguageId => "python";
+
+    private readonly ILogger<PythonCodebaseAnalyzer>? _logger;
+
+    private static readonly Regex ProjectNameRegex = new(@"^\s*name\s*=\s*[""]([^""]+)[""]", RegexOptions.Multiline);
+    private static readonly Regex ClassRegex = new(@"^\s*class\s+(\w+)(?:\(([^)]*)\))?\s*:", RegexOptions.Multiline);
+    private static readonly Regex DefRegex = new(@"^\s*def\s+(\w+)\s*\(", RegexOptions.Multiline);
+
+    public PythonCodebaseAnalyzer(ILogger<PythonCodebaseAnalyzer>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    public bool CanAnalyze(string codebasePath)
+    {
+        if (!Directory.Exists(codebasePath))
+            return false;
+        if (Directory.GetFiles(codebasePath, "pyproject.toml", SearchOption.AllDirectories).Length > 0) return true;
+        if (Directory.GetFiles(codebasePath, "setup.py", SearchOption.AllDirectories).Length > 0) return true;
+        if (Directory.GetFiles(codebasePath, "requirements.txt", SearchOption.AllDirectories).Length > 0) return true;
+        return Directory.GetFiles(codebasePath, "*.py", SearchOption.AllDirectories).Length > 0;
+    }
+
+    public async Task<CodebaseAnalysis> AnalyzeAsync(string codebasePath, string codebaseName, CancellationToken cancellationToken = default)
+    {
+        _logger?.LogInformation("[PythonCodebaseAnalyzer] Starting analysis of: {Path}", codebasePath);
+
+        if (!Directory.Exists(codebasePath))
+            throw new DirectoryNotFoundException($"Codebase path not found: {codebasePath}");
+
+        var analysis = new CodebaseAnalysis
+        {
+            CodebaseName = codebaseName,
+            CodebasePath = codebasePath,
+            AnalyzedAt = DateTime.UtcNow
+        };
+
+        var pyprojectFiles = Directory.GetFiles(codebasePath, "pyproject.toml", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + ".venv" + Path.DirectorySeparatorChar))
+            .ToList();
+        var setupFiles = Directory.GetFiles(codebasePath, "setup.py", SearchOption.AllDirectories).ToList();
+
+        if (pyprojectFiles.Count > 0)
+        {
+            foreach (var pyprojectPath in pyprojectFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var projectDir = Path.GetDirectoryName(pyprojectPath)!;
+                var projectInfo = await ParsePythonProjectAsync(projectDir, codebasePath, codebaseName, cancellationToken);
+                if (projectInfo != null)
+                {
+                    projectInfo.LanguageId = LanguageId;
+                    projectInfo.RootPath = GetRelativePath(projectDir, codebasePath);
+                    analysis.Projects.Add(projectInfo);
+                }
+            }
+        }
+        else if (setupFiles.Count > 0)
+        {
+            foreach (var setupPath in setupFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var projectDir = Path.GetDirectoryName(setupPath)!;
+                var projectInfo = await ParsePythonProjectAsync(projectDir, codebasePath, codebaseName, cancellationToken);
+                if (projectInfo != null)
+                {
+                    projectInfo.LanguageId = LanguageId;
+                    projectInfo.RootPath = GetRelativePath(projectDir, codebasePath);
+                    analysis.Projects.Add(projectInfo);
+                }
+            }
+        }
+        else
+        {
+            var projectInfo = await ParsePythonProjectAsync(codebasePath, codebasePath, codebaseName, cancellationToken);
+            if (projectInfo != null)
+            {
+                projectInfo.LanguageId = LanguageId;
+                projectInfo.RootPath = "";
+                analysis.Projects.Add(projectInfo);
+            }
+        }
+
+        _logger?.LogInformation("[PythonCodebaseAnalyzer] Found {Count} project(s)", analysis.Projects.Count);
+
+        analysis.Summary = BuildSummary(analysis);
+        analysis.Summary.Languages = new List<string> { LanguageId };
+        analysis.Conventions = new CodeConventions { NamingStyle = "snake_case", PrivateFieldPrefix = "_" };
+        analysis.RequirementContext = BuildRequirementContext(analysis);
+        analysis.PipelineContext = BuildPipelineContext(analysis);
+
+        return analysis;
+    }
+
+    private static string GetRelativePath(string fullPath, string basePath)
+    {
+        if (fullPath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+        {
+            var relative = fullPath.Substring(basePath.Length);
+            return relative.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        return fullPath;
+    }
+
+    private async Task<ProjectInfo?> ParsePythonProjectAsync(string projectDir, string basePath, string defaultName, CancellationToken cancellationToken)
+    {
+        var pyprojectPath = Path.Combine(projectDir, "pyproject.toml");
+        var setupPath = Path.Combine(projectDir, "setup.py");
+        string projectName = defaultName;
+        if (File.Exists(pyprojectPath))
+        {
+            var content = await File.ReadAllTextAsync(pyprojectPath, cancellationToken);
+            var m = ProjectNameRegex.Match(content);
+            if (m.Success) projectName = m.Groups[1].Value.Trim();
+        }
+
+        var projectInfo = new ProjectInfo
+        {
+            Name = projectName,
+            Path = projectDir,
+            RelativePath = GetRelativePath(projectDir, basePath),
+            ProjectDirectory = GetRelativePath(projectDir, basePath),
+            TargetFramework = "python",
+            OutputType = "Library",
+            RootNamespace = projectName
+        };
+
+        var pyFiles = Directory.GetFiles(projectDir, "*.py", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "__pycache__" + Path.DirectorySeparatorChar)
+                && !f.Contains(Path.DirectorySeparatorChar + ".venv" + Path.DirectorySeparatorChar))
+            .ToList();
+
+        foreach (var pyFile in pyFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var fileContent = await File.ReadAllTextAsync(pyFile, cancellationToken);
+                var relativePath = GetRelativePath(pyFile, basePath);
+                var moduleName = Path.GetFileNameWithoutExtension(pyFile);
+                if (moduleName != "__init__" && !projectInfo.Namespaces.Contains(moduleName))
+                    projectInfo.Namespaces.Add(moduleName);
+
+                foreach (Match m in ClassRegex.Matches(fileContent))
+                {
+                    var baseTypes = m.Groups[2].Success ? m.Groups[2].Value.Split(',').Select(t => t.Trim()).ToList() : new List<string>();
+                    projectInfo.Classes.Add(new TypeInfo
+                    {
+                        Name = m.Groups[1].Value,
+                        Namespace = moduleName,
+                        FilePath = relativePath,
+                        BaseTypes = baseTypes,
+                        DetectedPattern = InferPythonPattern(m.Groups[1].Value, fileContent)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Error parsing Python file: {Path}", pyFile);
+            }
+        }
+
+        if (projectInfo.Namespaces.Count == 0) projectInfo.Namespaces.Add("main");
+        projectInfo.DetectedPatterns = projectInfo.Classes.Select(c => c.DetectedPattern).Where(p => !string.IsNullOrEmpty(p)).Cast<string>().Distinct().ToList();
+        return projectInfo;
+    }
+
+    private static string? InferPythonPattern(string className, string content)
+    {
+        if (className.Contains("View") || className.Contains("Controller")) return "Controller";
+        if (className.Contains("Service") || className.Contains("Manager")) return "Service";
+        if (className.Contains("Repository") || className.Contains("DAO")) return "Repository";
+        if (className.EndsWith("Test") || content.Contains("unittest") || content.Contains("pytest")) return "UnitTest";
+        return null;
+    }
+
+    private CodebaseSummary BuildSummary(CodebaseAnalysis analysis)
+    {
+        return new CodebaseSummary
+        {
+            TotalSolutions = 0,
+            TotalProjects = analysis.Projects.Count,
+            TotalClasses = analysis.Projects.Sum(p => p.Classes.Count),
+            TotalInterfaces = 0,
+            TotalFiles = analysis.Projects.Sum(p => p.Classes.Select(c => c.FilePath).Distinct().Count()),
+            PrimaryFramework = "python",
+            DetectedPatterns = analysis.Projects.SelectMany(p => p.DetectedPatterns).Distinct().ToList(),
+            KeyNamespaces = analysis.Projects.SelectMany(p => p.Namespaces).Distinct().Take(10).ToList()
+        };
+    }
+
+    private RequirementContext BuildRequirementContext(CodebaseAnalysis analysis)
+    {
+        var context = new RequirementContext();
+        foreach (var project in analysis.Projects)
+            context.Projects.Add(new ProjectBrief { Name = project.Name, Type = "Package", Purpose = "Python package", KeyNamespaces = project.Namespaces.Take(3).ToList() });
+        context.Architecture = new List<string> { "Python package" };
+        context.Technologies = new List<string> { "Python" };
+        context.SummaryText = $"# Codebase: {analysis.CodebaseName}\n\n## Python\n" + string.Join("\n", analysis.Projects.Select(p => $"- **{p.Name}**"));
+        context.TokenEstimate = context.SummaryText.Length / 4;
+        return context;
+    }
+
+    private PipelineContext BuildPipelineContext(CodebaseAnalysis analysis)
+    {
+        var context = new PipelineContext();
+        foreach (var project in analysis.Projects)
+        {
+            var detail = new ProjectDetail { Name = project.Name, Path = project.RelativePath, RootNamespace = project.RootNamespace };
+            foreach (var cls in project.Classes.Take(50))
+                detail.Classes.Add(new ClassBrief { Name = cls.Name, Namespace = cls.Namespace, Pattern = cls.DetectedPattern });
+            context.ProjectDetails.Add(detail);
+        }
+        context.FullContextText = $"# Codebase: {analysis.CodebaseName}\n\nPython: " + string.Join(", ", analysis.Projects.Select(p => p.Name));
+        context.TokenEstimate = context.FullContextText.Length / 4;
+        return context;
+    }
+}

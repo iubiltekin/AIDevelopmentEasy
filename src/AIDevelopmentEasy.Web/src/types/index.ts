@@ -301,6 +301,8 @@ export interface CodebaseSummaryDto {
   primaryFramework: string;
   detectedPatterns: string[];
   keyNamespaces: string[];
+  /** Languages detected in the codebase (e.g. csharp, go, typescript). */
+  languages?: string[];
 }
 
 export interface CreateCodebaseRequest {
@@ -318,6 +320,12 @@ export interface ProjectSummaryDto {
   interfaceCount: number;
   detectedPatterns: string[];
   projectReferences: string[];
+  /** Language of this project (e.g. csharp, go, typescript). */
+  languageId?: string;
+  /** Role: Backend, Frontend, or empty. */
+  role?: string;
+  /** Root path of project relative to codebase. */
+  rootPath?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

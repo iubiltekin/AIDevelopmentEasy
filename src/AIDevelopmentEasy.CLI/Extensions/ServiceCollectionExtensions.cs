@@ -7,6 +7,12 @@ using AIDevelopmentEasy.CLI.Configuration;
 using AIDevelopmentEasy.CLI.Services;
 using AIDevelopmentEasy.CLI.Services.Interfaces;
 using AIDevelopmentEasy.Core.Agents;
+using AIDevelopmentEasy.Core.Analysis;
+using AIDevelopmentEasy.Core.Analysis.CSharp;
+using AIDevelopmentEasy.Core.Analysis.Go;
+using AIDevelopmentEasy.Core.Analysis.Rust;
+using AIDevelopmentEasy.Core.Analysis.Python;
+using AIDevelopmentEasy.Core.Analysis.Frontend;
 
 namespace AIDevelopmentEasy.CLI.Extensions;
 
@@ -23,7 +29,7 @@ public static class ServiceCollectionExtensions
         var appSettings = new AppSettings();
         configuration.Bind(appSettings);
         appSettings.AzureOpenAI.Validate();
-        
+
         services.AddSingleton(appSettings);
         services.AddSingleton(appSettings.AzureOpenAI);
         services.AddSingleton(appSettings.AIDevelopmentEasy);
@@ -51,11 +57,25 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         ILoggerFactory loggerFactory)
     {
+        services.AddSingleton<ICodebaseAnalyzer, CSharpCodebaseAnalyzer>();
+        services.AddSingleton<ICodebaseAnalyzer, GoCodebaseAnalyzer>();
+        services.AddSingleton<ICodebaseAnalyzer, RustCodebaseAnalyzer>();
+        services.AddSingleton<ICodebaseAnalyzer, PythonCodebaseAnalyzer>();
+        services.AddSingleton<ICodebaseAnalyzer, FrontendCodebaseAnalyzer>();
+        services.AddSingleton<CodebaseAnalyzerFactory>(sp =>
+            new CodebaseAnalyzerFactory(
+                sp.GetServices<ICodebaseAnalyzer>(),
+                loggerFactory.CreateLogger<CodebaseAnalyzerFactory>()));
+        services.AddSingleton<CodeAnalysisAgent>(sp =>
+            new CodeAnalysisAgent(
+                sp.GetRequiredService<CodebaseAnalyzerFactory>(),
+                loggerFactory.CreateLogger<CodeAnalysisAgent>()));
+
         services.AddSingleton(sp =>
         {
             var client = sp.GetRequiredService<OpenAIClient>();
             var settings = sp.GetRequiredService<AzureOpenAISettings>();
-            return new PlannerAgent(client, settings.DeploymentName, loggerFactory.CreateLogger<PlannerAgent>());
+            return new PlannerAgent(client, settings.DeploymentName, sp.GetRequiredService<CodeAnalysisAgent>(), loggerFactory.CreateLogger<PlannerAgent>());
         });
 
         services.AddSingleton(sp =>

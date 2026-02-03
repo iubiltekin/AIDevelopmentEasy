@@ -1,6 +1,6 @@
-import type { 
-  StoryDto, 
-  PipelineStatusDto, 
+import type {
+  StoryDto,
+  PipelineStatusDto,
   CreateStoryRequest,
   UpdateStoryTargetRequest,
   PipelinePhase,
@@ -40,10 +40,18 @@ const API_BASE = '/api';
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || `HTTP ${response.status}`);
+    const text = await response.text();
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const json = text ? JSON.parse(text) : null;
+      if (json && typeof json.detail === 'string') message = json.detail;
+      else if (json && typeof json.title === 'string') message = json.title;
+    } catch {
+      // keep message as text
+    }
+    throw new Error(message);
   }
-  
+
   const text = await response.text();
   return text ? JSON.parse(text) : ({} as T);
 }

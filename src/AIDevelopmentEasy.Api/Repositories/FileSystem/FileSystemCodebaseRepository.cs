@@ -94,7 +94,7 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
         {
             var json = await File.ReadAllTextAsync(analysisPath, cancellationToken);
             var analysis = JsonSerializer.Deserialize<CodebaseAnalysis>(json, _jsonOptions);
-            
+
             if (analysis == null)
                 return null;
 
@@ -114,7 +114,7 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
                 }
             }
 
-            _logger.LogInformation("[GetAnalysis] Loaded analysis for {Id}, CodebasePath: {Path}", 
+            _logger.LogInformation("[GetAnalysis] Loaded analysis for {Id}, CodebasePath: {Path}",
                 id, analysis.CodebasePath);
 
             return analysis;
@@ -175,6 +175,9 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
             throw new DirectoryNotFoundException($"Codebase not found: {id}");
         }
 
+        // Ensure entire codebase folder is writable (e.g. under ProgramData)
+        ClearReadOnlyRecursive(codebaseDir);
+
         // Ensure CodebasePath is preserved from metadata if not set
         if (string.IsNullOrEmpty(analysis.CodebasePath))
         {
@@ -190,15 +193,17 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
             }
         }
 
-        // Save analysis
+        // Save analysis (clear read-only so write succeeds under ProgramData)
         var analysisPath = Path.Combine(codebaseDir, AnalysisFileName);
+        EnsureWritable(analysisPath);
         var analysisJson = JsonSerializer.Serialize(analysis, _jsonOptions);
         await File.WriteAllTextAsync(analysisPath, analysisJson, cancellationToken);
 
         _logger.LogInformation("Saved analysis for codebase: {Id}, CodebasePath: {Path}", id, analysis.CodebasePath);
 
-        // Update metadata
+        // Update metadata (clear read-only so write succeeds)
         var metadataPath2 = Path.Combine(codebaseDir, MetadataFileName);
+        EnsureWritable(metadataPath2);
         if (File.Exists(metadataPath2))
         {
             var metadataJson = await File.ReadAllTextAsync(metadataPath2, cancellationToken);
@@ -219,6 +224,7 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
         if (!File.Exists(metadataPath))
             return;
 
+        EnsureWritable(metadataPath);
         var json = await File.ReadAllTextAsync(metadataPath, cancellationToken);
         var metadata = JsonSerializer.Deserialize<CodebaseMetadata>(json, _jsonOptions);
 
@@ -238,16 +244,111 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
         if (!Directory.Exists(codebaseDir))
             return Task.FromResult(false);
 
-        Directory.Delete(codebaseDir, recursive: true);
-        _logger.LogInformation("Deleted codebase: {Id}", id);
+        const int maxAttempts = 3;
+        const int delayMs = 400;
 
-        return Task.FromResult(true);
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                ClearReadOnlyRecursive(codebaseDir);
+                DeleteDirectoryContents(codebaseDir);
+                if (Directory.Exists(codebaseDir))
+                    Directory.Delete(codebaseDir);
+                _logger.LogInformation("Deleted codebase: {Id}", id);
+                return Task.FromResult(true);
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                _logger.LogWarning(ex, "Delete attempt {Attempt}/{Max} failed for codebase: {Id}, retrying in {Delay}ms.",
+                    attempt, maxAttempts, id, delayMs);
+                Thread.Sleep(delayMs);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete codebase: {Id} after {Max} attempts. Try closing the app or run as Administrator.", id, maxAttempts);
+                throw;
+            }
+        }
+
+        return Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Deletes all files and subdirectories so that the directory can be removed.
+    /// More reliable on Windows than Directory.Delete(path, true) when files are locked.
+    /// </summary>
+    private static void DeleteDirectoryContents(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+        foreach (var file in Directory.GetFiles(path))
+        {
+            var attrs = File.GetAttributes(file);
+            if ((attrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
+            File.Delete(file);
+        }
+        foreach (var dir in Directory.GetDirectories(path))
+        {
+            DeleteDirectoryContents(dir);
+            var dirAttrs = File.GetAttributes(dir);
+            if ((dirAttrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(dir, dirAttrs & ~FileAttributes.ReadOnly);
+            Directory.Delete(dir);
+        }
+    }
+
+    /// <summary>
+    /// Removes read-only attribute from all files and directories under the given path
+    /// so that delete/write operations succeed under ProgramData or locked folders.
+    /// </summary>
+    private static void EnsureWritable(string filePath)
+    {
+        if (!File.Exists(filePath))
+            return;
+        try
+        {
+            var attrs = File.GetAttributes(filePath);
+            if ((attrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(filePath, attrs & ~FileAttributes.ReadOnly);
+        }
+        catch
+        {
+            // Ignore; write may still succeed
+        }
+    }
+
+    private static void ClearReadOnlyRecursive(string path)
+    {
+        if (File.Exists(path))
+        {
+            var attrs = File.GetAttributes(path);
+            if ((attrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly);
+            return;
+        }
+        if (!Directory.Exists(path))
+            return;
+
+        foreach (var file in Directory.GetFiles(path))
+        {
+            var attrs = File.GetAttributes(file);
+            if ((attrs & FileAttributes.ReadOnly) != 0)
+                File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
+        }
+        foreach (var dir in Directory.GetDirectories(path))
+            ClearReadOnlyRecursive(dir);
+
+        var dirAttrs = File.GetAttributes(path);
+        if ((dirAttrs & FileAttributes.ReadOnly) != 0)
+            File.SetAttributes(path, dirAttrs & ~FileAttributes.ReadOnly);
     }
 
     public Task<bool> ExistsAsync(string id, CancellationToken cancellationToken = default)
     {
         var codebaseDir = GetCodebaseDirectory(id);
-        return Task.FromResult(Directory.Exists(codebaseDir) && 
+        return Task.FromResult(Directory.Exists(codebaseDir) &&
             File.Exists(Path.Combine(codebaseDir, MetadataFileName)));
     }
 
@@ -297,7 +398,8 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
                         TotalInterfaces = analysis.Summary.TotalInterfaces,
                         PrimaryFramework = analysis.Summary.PrimaryFramework,
                         DetectedPatterns = analysis.Summary.DetectedPatterns,
-                        KeyNamespaces = analysis.Summary.KeyNamespaces
+                        KeyNamespaces = analysis.Summary.KeyNamespaces,
+                        Languages = analysis.Summary.Languages ?? new List<string>()
                     };
                 }
             }

@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, FolderCode, FileCode, Layers, Copy, Check, Zap, Database, Server, AlertCircle } from 'lucide-react';
 import { codebasesApi } from '../services/api';
-import { 
-  CodebaseDto, 
-  ProjectSummaryDto, 
-  CodebaseStatus, 
-  getCodebaseStatusLabel, 
+import {
+  CodebaseDto,
+  ProjectSummaryDto,
+  CodebaseStatus,
+  getCodebaseStatusLabel,
   getCodebaseStatusColor,
   RequirementContextDto,
   PipelineContextDto
@@ -163,11 +163,10 @@ export function CodebaseDetail() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === tab.key
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === tab.key
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-800 text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             {tab.icon}
             {tab.label}
@@ -179,6 +178,21 @@ export function CodebaseDetail() {
       <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
         {activeTab === 'overview' && codebase.summary && (
           <div className="space-y-6">
+            {codebase.summary.languages && codebase.summary.languages.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-emerald-400" />
+                  Languages
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {codebase.summary.languages.map((lang, i) => (
+                    <span key={i} className="px-3 py-1 bg-emerald-900/40 text-emerald-300 rounded-lg text-sm font-medium capitalize">
+                      {lang}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                 <Layers className="w-5 h-5 text-blue-400" />
@@ -280,7 +294,17 @@ export function CodebaseDetail() {
                           <div className="text-sm text-slate-400 font-mono">{project.relativePath}</div>
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {project.languageId && (
+                          <span className="px-2 py-1 bg-emerald-900/50 text-emerald-300 rounded text-xs font-medium capitalize">
+                            {project.languageId}
+                          </span>
+                        )}
+                        {project.role && (
+                          <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs">
+                            {project.role}
+                          </span>
+                        )}
                         <span className="px-2 py-1 bg-slate-700 rounded text-xs text-slate-300">
                           {project.targetFramework}
                         </span>
@@ -469,10 +493,10 @@ export function CodebaseDetail() {
                   </div>
                   <p className="text-sm text-slate-300">
                     Pipeline context is <strong className="text-amber-400">
-                      {pipelineContext.tokenEstimate > 0 && requirementContext?.tokenEstimate 
-                        ? Math.round(pipelineContext.tokenEstimate / requirementContext.tokenEstimate) 
+                      {pipelineContext.tokenEstimate > 0 && requirementContext?.tokenEstimate
+                        ? Math.round(pipelineContext.tokenEstimate / requirementContext.tokenEstimate)
                         : '?'}×
-                    </strong> larger than requirement context. 
+                    </strong> larger than requirement context.
                     Requirements Wizard uses the lightweight version to save costs.
                   </p>
                 </div>

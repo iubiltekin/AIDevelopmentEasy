@@ -21,13 +21,13 @@ public class PlannerAgent : BaseAgent
     public override string Name => "Planner";
     public override string Role => "Software Project Planner - Decomposes requirements into development tasks";
     protected override string? PromptFileName => "planner";
-    
+
     private readonly CodeAnalysisAgent _codeAnalysisAgent;
 
-    public PlannerAgent(OpenAIClient openAIClient, string deploymentName, ILogger<PlannerAgent>? logger = null)
+    public PlannerAgent(OpenAIClient openAIClient, string deploymentName, CodeAnalysisAgent codeAnalysisAgent, ILogger<PlannerAgent>? logger = null)
         : base(openAIClient, deploymentName, logger)
     {
-        _codeAnalysisAgent = new CodeAnalysisAgent(null);
+        _codeAnalysisAgent = codeAnalysisAgent;
     }
 
     /// <summary>
@@ -204,14 +204,14 @@ IMPORTANT: Output ONLY valid JSON, no explanations before or after.";
             // Check if we have codebase context
             var codebaseContext = "";
             var hasCodebaseContext = false;
-            
+
             if (request.Context?.TryGetValue("codebase_context", out var ctx) == true && !string.IsNullOrEmpty(ctx))
             {
                 hasCodebaseContext = true;
                 var codebaseName = request.Context.TryGetValue("codebase_name", out var name) ? name : "existing codebase";
                 var testFramework = request.Context.TryGetValue("test_framework", out var tf) ? tf : "NUnit";
                 var fieldPrefix = request.Context.TryGetValue("private_field_prefix", out var fp) ? fp : "_";
-                
+
                 codebaseContext = $@"
 
 ## EXISTING CODEBASE: {codebaseName}
@@ -281,7 +281,7 @@ For each task, specify:
 
                     // Parse project name for multi-project support
                     var taskProject = taskEl.TryGetProperty("project", out var proj) ? proj.GetString() : null;
-                    
+
                     // Parse dependencies
                     var dependsOn = new List<int>();
                     if (taskEl.TryGetProperty("depends_on", out var deps))
@@ -307,7 +307,7 @@ For each task, specify:
 
                     // Parse namespace (CRITICAL for correct code generation)
                     var taskNamespace = taskEl.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
-                    
+
                     tasks.Add(new SubTask
                     {
                         Index = taskEl.TryGetProperty("index", out var idx) ? idx.GetInt32() : tasks.Count + 1,
@@ -469,10 +469,10 @@ Output the plan as JSON with the following structure:
             classResult.ClassName, referenceResult.References.Count);
 
         var modificationContext = _codeAnalysisAgent.GenerateModificationContext(classResult, referenceResult, modificationTasks);
-        
+
         // Add codebase context if available
-        var codebaseContext = codebaseAnalysis != null 
-            ? _codeAnalysisAgent.GenerateContextForPrompt(codebaseAnalysis) 
+        var codebaseContext = codebaseAnalysis != null
+            ? _codeAnalysisAgent.GenerateContextForPrompt(codebaseAnalysis)
             : "";
 
         var userPrompt = BuildModificationPrompt(requirement, modificationContext, codebaseContext);
@@ -513,7 +513,7 @@ Output the plan as JSON with the following structure:
 
                     var taskProject = taskEl.TryGetProperty("project", out var proj) ? proj.GetString() : null;
                     var modType = taskEl.TryGetProperty("modification_type", out var mt) ? mt.GetString() : "modify";
-                    
+
                     var dependsOn = new List<int>();
                     if (taskEl.TryGetProperty("depends_on", out var deps))
                     {
