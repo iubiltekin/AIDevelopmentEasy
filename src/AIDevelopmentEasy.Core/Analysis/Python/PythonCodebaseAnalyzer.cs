@@ -205,12 +205,109 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
     {
         var context = new RequirementContext();
         foreach (var project in analysis.Projects)
-            context.Projects.Add(new ProjectBrief { Name = project.Name, Type = "Package", Purpose = "Python package", KeyNamespaces = project.Namespaces.Take(3).ToList() });
-        context.Architecture = new List<string> { "Python package" };
+        {
+            var projectType = DetectPythonProjectType(project);
+            var purpose = InferPythonPurpose(project, projectType);
+            context.Projects.Add(new ProjectBrief
+            {
+                Name = project.Name,
+                Type = projectType,
+                Purpose = purpose,
+                KeyNamespaces = project.Namespaces.Take(5).ToList()
+            });
+        }
+        context.Architecture = DetectPythonArchitecture(analysis);
         context.Technologies = new List<string> { "Python" };
-        context.SummaryText = $"# Codebase: {analysis.CodebaseName}\n\n## Python\n" + string.Join("\n", analysis.Projects.Select(p => $"- **{p.Name}**"));
-        context.TokenEstimate = context.SummaryText.Length / 4;
+        context.ExtensionPoints = FindPythonExtensionPoints(analysis);
+        context.SummaryText = GeneratePythonRequirementSummaryText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.SummaryText);
         return context;
+    }
+
+    private static string DetectPythonProjectType(ProjectInfo project)
+    {
+        if (project.DetectedPatterns.Contains("UnitTest")) return "Tests";
+        if (project.Classes.Any(c => c.DetectedPattern == "Controller" || c.DetectedPattern == "View")) return "API/Web";
+        if (project.Classes.Any(c => c.DetectedPattern == "Service")) return "Application";
+        return "Package";
+    }
+
+    private static string InferPythonPurpose(ProjectInfo project, string projectType)
+    {
+        return projectType switch
+        {
+            "API/Web" => "Web API or MVC (views, controllers)",
+            "Application" => "Business logic and services",
+            "Tests" => "Unit and integration tests",
+            "Package" => "Python package (modules and classes)",
+            _ => "Python project"
+        };
+    }
+
+    private static List<string> DetectPythonArchitecture(CodebaseAnalysis analysis)
+    {
+        var layers = new List<string>();
+        var patterns = analysis.Projects.SelectMany(p => p.DetectedPatterns).Distinct().ToList();
+        if (patterns.Any(p => p == "Controller" || p == "View")) layers.Add("View/Controller Layer");
+        if (patterns.Any(p => p == "Service")) layers.Add("Service Layer");
+        if (patterns.Any(p => p == "Repository")) layers.Add("Repository/Data Layer");
+        if (layers.Count == 0) layers.Add("Module-based package layout");
+        return layers;
+    }
+
+    private static List<ExtensionPoint> FindPythonExtensionPoints(CodebaseAnalysis analysis)
+    {
+        var points = new List<ExtensionPoint>();
+        foreach (var project in analysis.Projects)
+        {
+            var controllers = project.Classes.Where(c => c.DetectedPattern == "Controller" || c.DetectedPattern == "View").ToList();
+            if (controllers.Any())
+            {
+                var mod = controllers.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Views/Controllers", Project = project.Name, Namespace = mod, Pattern = "Controller" });
+            }
+            var services = project.Classes.Where(c => c.DetectedPattern == "Service").ToList();
+            if (services.Any())
+            {
+                var mod = services.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Services", Project = project.Name, Namespace = mod, Pattern = "Service" });
+            }
+            var repos = project.Classes.Where(c => c.DetectedPattern == "Repository").ToList();
+            if (repos.Any())
+            {
+                var mod = repos.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Repositories", Project = project.Name, Namespace = mod, Pattern = "Repository" });
+            }
+        }
+        return points.Take(10).ToList();
+    }
+
+    private static string GeneratePythonRequirementSummaryText(RequirementContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine();
+        sb.AppendLine("## Architecture (Python)");
+        foreach (var layer in context.Architecture) sb.AppendLine($"- {layer}");
+        sb.AppendLine();
+        sb.AppendLine("## Projects / Packages");
+        foreach (var project in context.Projects)
+        {
+            sb.AppendLine($"- **{project.Name}** ({project.Type}): {project.Purpose}");
+            if (project.KeyNamespaces.Any())
+                sb.AppendLine($"  Modules: {string.Join(", ", project.KeyNamespaces)}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("## Technologies");
+        sb.AppendLine(string.Join(", ", context.Technologies));
+        if (context.ExtensionPoints.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Extension Points (where to add new code)");
+            foreach (var ep in context.ExtensionPoints)
+                sb.AppendLine($"- {ep.Layer}: {ep.Project} → module {ep.Namespace}");
+        }
+        return sb.ToString();
     }
 
     private PipelineContext BuildPipelineContext(CodebaseAnalysis analysis)
@@ -218,13 +315,46 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
         var context = new PipelineContext();
         foreach (var project in analysis.Projects)
         {
-            var detail = new ProjectDetail { Name = project.Name, Path = project.RelativePath, RootNamespace = project.RootNamespace };
-            foreach (var cls in project.Classes.Take(50))
-                detail.Classes.Add(new ClassBrief { Name = cls.Name, Namespace = cls.Namespace, Pattern = cls.DetectedPattern });
+            var detail = new ProjectDetail
+            {
+                Name = project.Name,
+                Path = project.RelativePath,
+                RootNamespace = project.RootNamespace
+            };
+            foreach (var cls in project.Classes.Take(80))
+                detail.Classes.Add(new ClassBrief { Name = cls.Name, Namespace = cls.Namespace, Pattern = cls.DetectedPattern, BaseTypes = cls.BaseTypes });
             context.ProjectDetails.Add(detail);
         }
-        context.FullContextText = $"# Codebase: {analysis.CodebaseName}\n\nPython: " + string.Join(", ", analysis.Projects.Select(p => p.Name));
-        context.TokenEstimate = context.FullContextText.Length / 4;
+        context.FullContextText = GeneratePythonPipelineContextText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.FullContextText);
         return context;
     }
+
+    private static string GeneratePythonPipelineContextText(PipelineContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine("Language: Python | Conventions: snake_case (functions, modules), PascalCase not required for classes");
+        sb.AppendLine();
+        foreach (var project in context.ProjectDetails)
+        {
+            sb.AppendLine($"## Package: {project.Name}");
+            sb.AppendLine($"Path: {project.Path}");
+            sb.AppendLine();
+            if (project.Classes.Any())
+            {
+                sb.AppendLine("### Classes");
+                foreach (var cls in project.Classes.Take(40))
+                {
+                    var baseInfo = cls.BaseTypes != null && cls.BaseTypes.Count > 0 ? $"({string.Join(", ", cls.BaseTypes)})" : "";
+                    var patternInfo = !string.IsNullOrEmpty(cls.Pattern) ? $" [{cls.Pattern}]" : "";
+                    sb.AppendLine($"- {cls.Namespace}.{cls.Name} {baseInfo}{patternInfo}");
+                }
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    private static int EstimateTokens(string text) => text.Length / 4;
 }

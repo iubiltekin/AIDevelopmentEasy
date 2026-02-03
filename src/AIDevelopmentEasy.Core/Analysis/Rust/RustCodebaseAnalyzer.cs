@@ -152,12 +152,82 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
     {
         var context = new RequirementContext();
         foreach (var project in analysis.Projects)
-            context.Projects.Add(new ProjectBrief { Name = project.Name, Type = "Crate", Purpose = "Rust package", KeyNamespaces = project.Namespaces.Take(3).ToList() });
-        context.Architecture = new List<string> { "Rust crates" };
+        {
+            var purpose = "Rust crate (structs, enums, traits)";
+            if (project.Classes.Count > 0 || project.Interfaces.Count > 0)
+                purpose = $"Crate: {project.Classes.Count} types, {project.Interfaces.Count} traits";
+            context.Projects.Add(new ProjectBrief
+            {
+                Name = project.Name,
+                Type = "Crate",
+                Purpose = purpose,
+                KeyNamespaces = project.Namespaces.Take(5).ToList()
+            });
+        }
+        context.Architecture = DetectRustArchitecture(analysis);
         context.Technologies = new List<string> { "Rust" };
-        context.SummaryText = $"# Codebase: {analysis.CodebaseName}\n\n## Rust crates\n" + string.Join("\n", analysis.Projects.Select(p => $"- **{p.Name}** ({p.RootPath})"));
-        context.TokenEstimate = context.SummaryText.Length / 4;
+        context.ExtensionPoints = FindRustExtensionPoints(analysis);
+        context.SummaryText = GenerateRustRequirementSummaryText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.SummaryText);
         return context;
+    }
+
+    private static List<string> DetectRustArchitecture(CodebaseAnalysis analysis)
+    {
+        var layers = new List<string>();
+        var hasStructs = analysis.Projects.Any(p => p.Classes.Any());
+        var hasTraits = analysis.Projects.Any(p => p.Interfaces.Any());
+        if (hasStructs) layers.Add("Structs (data types)");
+        if (hasTraits) layers.Add("Traits (abstractions)");
+        layers.Add("Module-based crate layout");
+        return layers;
+    }
+
+    private static List<ExtensionPoint> FindRustExtensionPoints(CodebaseAnalysis analysis)
+    {
+        var points = new List<ExtensionPoint>();
+        foreach (var project in analysis.Projects)
+        {
+            if (project.Interfaces.Any())
+            {
+                var trait = project.Interfaces.First();
+                points.Add(new ExtensionPoint { Layer = "Traits", Project = project.Name, Namespace = trait.Namespace, Pattern = "Trait" });
+            }
+            if (project.Classes.Any())
+            {
+                var first = project.Classes.First();
+                points.Add(new ExtensionPoint { Layer = "Structs/Enums", Project = project.Name, Namespace = first.Namespace, Pattern = "Type" });
+            }
+        }
+        return points.Take(10).ToList();
+    }
+
+    private static string GenerateRustRequirementSummaryText(RequirementContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine();
+        sb.AppendLine("## Architecture (Rust)");
+        foreach (var layer in context.Architecture) sb.AppendLine($"- {layer}");
+        sb.AppendLine();
+        sb.AppendLine("## Crates");
+        foreach (var project in context.Projects)
+        {
+            sb.AppendLine($"- **{project.Name}** ({project.Type}): {project.Purpose}");
+            if (project.KeyNamespaces.Any())
+                sb.AppendLine($"  Modules: {string.Join(", ", project.KeyNamespaces)}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("## Technologies");
+        sb.AppendLine(string.Join(", ", context.Technologies));
+        if (context.ExtensionPoints.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Extension Points");
+            foreach (var ep in context.ExtensionPoints)
+                sb.AppendLine($"- {ep.Layer}: {ep.Project} → {ep.Namespace}");
+        }
+        return sb.ToString();
     }
 
     private PipelineContext BuildPipelineContext(CodebaseAnalysis analysis)
@@ -165,15 +235,51 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
         var context = new PipelineContext();
         foreach (var project in analysis.Projects)
         {
-            var detail = new ProjectDetail { Name = project.Name, Path = project.RelativePath, RootNamespace = project.RootNamespace };
-            foreach (var cls in project.Classes.Take(50))
+            var detail = new ProjectDetail
+            {
+                Name = project.Name,
+                Path = project.RelativePath,
+                RootNamespace = project.RootNamespace
+            };
+            foreach (var cls in project.Classes.Take(80))
                 detail.Classes.Add(new ClassBrief { Name = cls.Name, Namespace = cls.Namespace });
-            foreach (var iface in project.Interfaces.Take(30))
+            foreach (var iface in project.Interfaces.Take(50))
                 detail.Interfaces.Add(new InterfaceBrief { Name = iface.Name, Namespace = iface.Namespace });
             context.ProjectDetails.Add(detail);
         }
-        context.FullContextText = $"# Codebase: {analysis.CodebaseName}\n\nRust crates: " + string.Join(", ", analysis.Projects.Select(p => p.Name));
-        context.TokenEstimate = context.FullContextText.Length / 4;
+        context.FullContextText = GenerateRustPipelineContextText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.FullContextText);
         return context;
     }
+
+    private static string GenerateRustPipelineContextText(PipelineContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine("Language: Rust | Conventions: snake_case (functions, modules), PascalCase (types, traits)");
+        sb.AppendLine();
+        foreach (var project in context.ProjectDetails)
+        {
+            sb.AppendLine($"## Crate: {project.Name}");
+            sb.AppendLine($"Path: {project.Path}");
+            sb.AppendLine();
+            if (project.Interfaces.Any())
+            {
+                sb.AppendLine("### Traits");
+                foreach (var t in project.Interfaces.Take(25))
+                    sb.AppendLine($"- {t.Namespace}.{t.Name}");
+                sb.AppendLine();
+            }
+            if (project.Classes.Any())
+            {
+                sb.AppendLine("### Structs / Enums");
+                foreach (var c in project.Classes.Take(40))
+                    sb.AppendLine($"- {c.Namespace}.{c.Name}");
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    private static int EstimateTokens(string text) => text.Length / 4;
 }

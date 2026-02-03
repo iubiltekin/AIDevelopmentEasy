@@ -60,6 +60,29 @@ export function CodebaseDetail() {
     load();
   }, [id]);
 
+  // Poll when status is Analyzing so we refresh to Ready and load contexts
+  useEffect(() => {
+    if (!id || !codebase || codebase.status !== CodebaseStatus.Analyzing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const cb = await codebasesApi.getById(id);
+        setCodebase(cb);
+        if (cb.status === CodebaseStatus.Ready) {
+          const [reqCtx, pipeCtx] = await Promise.all([
+            codebasesApi.getRequirementContext(id).catch(() => null),
+            codebasesApi.getPipelineContext(id).catch(() => null)
+          ]);
+          setRequirementContext(reqCtx);
+          setPipelineContext(pipeCtx);
+          setProjects(await codebasesApi.getProjects(id).catch(() => []));
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [id, codebase?.status]);
+
   const handleCopy = async (text: string, type: 'req' | 'pipe') => {
     await navigator.clipboard.writeText(text);
     if (type === 'req') {
@@ -164,8 +187,8 @@ export function CodebaseDetail() {
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${activeTab === tab.key
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800 text-slate-400 hover:text-white'
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
           >
             {tab.icon}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Database, RefreshCw, Plus, Trash2, RotateCcw, FolderCode, Layers } from 'lucide-react';
 import { codebasesApi } from '../services/api';
@@ -8,19 +8,23 @@ export function Codebases() {
   const [codebases, setCodebases] = useState<CodebaseDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
   const [creating, setCreating] = useState(false);
+  const pollingUntilRef = useRef(0);
 
-  const fetchCodebases = async () => {
+  const fetchCodebases = async (): Promise<CodebaseDto[]> => {
     try {
       setLoading(true);
       const data = await codebasesApi.getAll();
       setCodebases(data);
       setError(null);
+      return data;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load codebases');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -28,17 +32,25 @@ export function Codebases() {
 
   useEffect(() => {
     fetchCodebases();
+  }, []);
 
-    // Poll for status updates while analyzing
-    const interval = setInterval(() => {
-      const analyzing = codebases.some(c => c.status === CodebaseStatus.Analyzing);
-      if (analyzing) {
-        fetchCodebases();
-      }
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (pollingUntilRef.current <= Date.now()) return;
+      try {
+        const data = await codebasesApi.getAll();
+        setCodebases(data);
+        setError(null);
+        const anyAnalyzing = data.some(c => c.status === CodebaseStatus.Analyzing);
+        if (!anyAnalyzing) {
+          pollingUntilRef.current = 0;
+          setSuccessMessage('Analysis complete. List updated.');
+          setTimeout(() => setSuccessMessage(null), 4000);
+        }
+      } catch { /* keep previous state on poll error */ }
     }, 3000);
-
     return () => clearInterval(interval);
-  }, [codebases.length]);
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,8 +72,11 @@ export function Codebases() {
 
   const handleReanalyze = async (id: string) => {
     try {
+      setError(null);
       await codebasesApi.analyze(id);
-      fetchCodebases();
+      pollingUntilRef.current = Date.now() + 120000;
+      setSuccessMessage('Re-analyze started. List will update when complete.');
+      await fetchCodebases();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start analysis');
     }
@@ -114,6 +129,12 @@ export function Codebases() {
       {error && (
         <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400">
           {error}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">
+          {successMessage}
         </div>
       )}
 

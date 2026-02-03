@@ -192,19 +192,119 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         var context = new RequirementContext();
         foreach (var project in analysis.Projects)
         {
+            var projectType = DetectGoProjectType(project);
+            var purpose = InferGoPurpose(project, projectType);
             context.Projects.Add(new ProjectBrief
             {
                 Name = project.Name,
-                Type = project.RootPath.Contains("cmd") ? "CLI" : "Library",
-                Purpose = "Go module",
-                KeyNamespaces = project.Namespaces.Take(3).ToList()
+                Type = projectType,
+                Purpose = purpose,
+                KeyNamespaces = project.Namespaces.Take(5).ToList()
             });
         }
-        context.Architecture = new List<string> { "Go modules" };
-        context.Technologies = new List<string> { "Go" };
-        context.SummaryText = $"# Codebase: {analysis.CodebaseName}\n\n## Go modules\n" + string.Join("\n", analysis.Projects.Select(p => $"- **{p.Name}** ({p.RootPath})"));
-        context.TokenEstimate = context.SummaryText.Length / 4;
+        context.Architecture = DetectGoArchitecture(analysis);
+        context.Technologies = DetectGoTechnologies(analysis);
+        context.ExtensionPoints = FindGoExtensionPoints(analysis);
+        context.SummaryText = GenerateGoRequirementSummaryText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.SummaryText);
         return context;
+    }
+
+    private static string DetectGoProjectType(ProjectInfo project)
+    {
+        var path = project.RootPath.Replace('\\', '/').ToLowerInvariant();
+        if (path.Contains("cmd")) return "CLI";
+        if (path.Contains("api") || path.Contains("server") || path.Contains("main")) return "API";
+        if (path.Contains("internal")) return "Library";
+        if (project.Classes.Any(c => c.DetectedPattern == "UnitTest")) return "Tests";
+        return "Library";
+    }
+
+    private static string InferGoPurpose(ProjectInfo project, string projectType)
+    {
+        return projectType switch
+        {
+            "CLI" => "Command-line entry point",
+            "API" => "HTTP API (handlers, routes)",
+            "Library" => "Shared packages and business logic",
+            "Tests" => "Unit and integration tests",
+            _ => "Go module"
+        };
+    }
+
+    private static List<string> DetectGoArchitecture(CodebaseAnalysis analysis)
+    {
+        var layers = new List<string>();
+        var patterns = analysis.Projects.SelectMany(p => p.DetectedPatterns).Distinct().ToList();
+        if (patterns.Any(p => p == "Controller" || p == "Handler")) layers.Add("Handler/API Layer");
+        if (patterns.Any(p => p == "Service")) layers.Add("Service Layer");
+        if (patterns.Any(p => p == "Repository")) layers.Add("Repository/Data Layer");
+        if (layers.Count == 0) layers.Add("Go modules (packages)");
+        return layers;
+    }
+
+    private static List<string> DetectGoTechnologies(CodebaseAnalysis analysis)
+    {
+        var tech = new HashSet<string> { "Go" };
+        var first = analysis.Projects.FirstOrDefault();
+        if (!string.IsNullOrEmpty(first?.TargetFramework) && first.TargetFramework.StartsWith("go "))
+            tech.Add(first.TargetFramework);
+        return tech.ToList();
+    }
+
+    private static List<ExtensionPoint> FindGoExtensionPoints(CodebaseAnalysis analysis)
+    {
+        var points = new List<ExtensionPoint>();
+        foreach (var project in analysis.Projects)
+        {
+            var handlers = project.Classes.Where(c => c.DetectedPattern == "Controller" || c.DetectedPattern == "Handler").ToList();
+            if (handlers.Any())
+            {
+                var pkg = handlers.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Handlers", Project = project.Name, Namespace = pkg, Pattern = "Handler" });
+            }
+            var services = project.Classes.Where(c => c.DetectedPattern == "Service").ToList();
+            if (services.Any())
+            {
+                var pkg = services.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Services", Project = project.Name, Namespace = pkg, Pattern = "Service" });
+            }
+            var repos = project.Classes.Where(c => c.DetectedPattern == "Repository").ToList();
+            if (repos.Any())
+            {
+                var pkg = repos.First().Namespace;
+                points.Add(new ExtensionPoint { Layer = "Repositories", Project = project.Name, Namespace = pkg, Pattern = "Repository" });
+            }
+        }
+        return points.Take(10).ToList();
+    }
+
+    private static string GenerateGoRequirementSummaryText(RequirementContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine();
+        sb.AppendLine("## Architecture (Go best practices)");
+        foreach (var layer in context.Architecture) sb.AppendLine($"- {layer}");
+        sb.AppendLine();
+        sb.AppendLine("## Projects (modules)");
+        foreach (var project in context.Projects)
+        {
+            sb.AppendLine($"- **{project.Name}** ({project.Type}): {project.Purpose}");
+            if (project.KeyNamespaces.Any())
+                sb.AppendLine($"  Packages: {string.Join(", ", project.KeyNamespaces)}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("## Technologies");
+        sb.AppendLine(string.Join(", ", context.Technologies));
+        if (context.ExtensionPoints.Any())
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Extension Points (where to add new code)");
+            foreach (var ep in context.ExtensionPoints)
+                sb.AppendLine($"- {ep.Layer}: {ep.Project} → package {ep.Namespace}");
+        }
+        return sb.ToString();
     }
 
     private PipelineContext BuildPipelineContext(CodebaseAnalysis analysis)
@@ -218,14 +318,51 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
                 Path = project.RelativePath,
                 RootNamespace = project.RootNamespace
             };
-            foreach (var cls in project.Classes.Take(50))
+            foreach (var cls in project.Classes.Take(80))
                 detail.Classes.Add(new ClassBrief { Name = cls.Name, Namespace = cls.Namespace, Pattern = cls.DetectedPattern });
-            foreach (var iface in project.Interfaces.Take(30))
+            foreach (var iface in project.Interfaces.Take(50))
                 detail.Interfaces.Add(new InterfaceBrief { Name = iface.Name, Namespace = iface.Namespace });
             context.ProjectDetails.Add(detail);
         }
-        context.FullContextText = $"# Codebase: {analysis.CodebaseName}\n\n" + string.Join("\n", context.ProjectDetails.Select(d => $"## {d.Name}\nPackages: {string.Join(", ", analysis.Projects.FirstOrDefault(p => p.Name == d.Name)?.Namespaces.Take(5) ?? Array.Empty<string>())}"));
-        context.TokenEstimate = context.FullContextText.Length / 4;
+        context.FullContextText = GenerateGoPipelineContextText(context, analysis);
+        context.TokenEstimate = EstimateTokens(context.FullContextText);
         return context;
     }
+
+    private static string GenerateGoPipelineContextText(PipelineContext context, CodebaseAnalysis analysis)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
+        sb.AppendLine($"Language: Go | Conventions: MixedCaps (exported), camelCase (unexported)");
+        sb.AppendLine();
+        foreach (var project in context.ProjectDetails)
+        {
+            var proj = analysis.Projects.FirstOrDefault(p => p.Name == project.Name);
+            sb.AppendLine($"## Module: {project.Name}");
+            sb.AppendLine($"Path: {project.Path}");
+            if (proj?.Namespaces.Any() == true)
+                sb.AppendLine($"Packages: {string.Join(", ", proj.Namespaces.Take(15))}");
+            sb.AppendLine();
+            if (project.Interfaces.Any())
+            {
+                sb.AppendLine("### Interfaces");
+                foreach (var iface in project.Interfaces.Take(25))
+                    sb.AppendLine($"- {iface.Namespace}.{iface.Name}");
+                sb.AppendLine();
+            }
+            if (project.Classes.Any())
+            {
+                sb.AppendLine("### Structs / Types");
+                foreach (var cls in project.Classes.Take(40))
+                {
+                    var patternInfo = !string.IsNullOrEmpty(cls.Pattern) ? $" [{cls.Pattern}]" : "";
+                    sb.AppendLine($"- {cls.Namespace}.{cls.Name}{patternInfo}");
+                }
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    private static int EstimateTokens(string text) => text.Length / 4;
 }
