@@ -207,6 +207,40 @@ public class CodeAnalysisAgent
     }
 
     /// <summary>
+    /// Find a type (class/struct/interface) in a specific file and return its line range for code modification.
+    /// Used to tell Coder exactly which class and lines to modify.
+    /// </summary>
+    /// <param name="analysis">Codebase analysis</param>
+    /// <param name="filePath">Relative file path (e.g. "Project/Services/UserService.cs") - normalized to forward slashes for match</param>
+    /// <param name="typeNameHint">Optional. If provided, match type name (ignore case). If null, first type in file is returned.</param>
+    /// <returns>The TypeInfo with StartLine/EndLine set, or null if not found</returns>
+    public static TypeInfo? FindTypeInFile(CodebaseAnalysis analysis, string filePath, string? typeNameHint = null)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return null;
+        var normalizedPath = filePath.Replace('\\', '/').Trim();
+        var fileName = Path.GetFileName(normalizedPath);
+
+        foreach (var project in analysis.Projects)
+        {
+            foreach (var type in project.Classes.Concat<TypeInfo>(project.Interfaces))
+            {
+                var typePath = (type.FilePath ?? "").Replace('\\', '/').Trim();
+                var typeFileName = Path.GetFileName(typePath);
+                bool pathMatch = typePath.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase) ||
+                    typePath.EndsWith("/" + normalizedPath, StringComparison.OrdinalIgnoreCase) ||
+                    normalizedPath.EndsWith("/" + typePath, StringComparison.OrdinalIgnoreCase) ||
+                    (fileName.Length > 0 && typeFileName.Equals(fileName, StringComparison.OrdinalIgnoreCase) &&
+                     (typePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase) || normalizedPath.EndsWith(typePath, StringComparison.OrdinalIgnoreCase)));
+                if (!pathMatch) continue;
+                if (!string.IsNullOrEmpty(typeNameHint) && !type.Name.Equals(typeNameHint, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return type;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Find all references to a class in the codebase
     /// </summary>
     public async Task<ReferenceSearchResult> FindReferencesAsync(CodebaseAnalysis analysis, string className, CancellationToken cancellationToken = default)
@@ -620,24 +654,26 @@ public class CodeAnalysisAgent
                 .ToList();
             if (filesWithTypes.Any())
             {
-                sb.AppendLine($"  - Files and types (target_files must be from this list; types in each file):");
+                sb.AppendLine($"  - Files and types (target_files must be from this list; types in each file with line ranges for modification):");
                 foreach (var g in filesWithTypes)
                 {
-                    var types = g.Select(c => c.Name).Where(n => !string.IsNullOrEmpty(n)).Distinct().Take(8);
-                    sb.AppendLine($"    - {g.Key} ({string.Join(", ", types)})");
+                    var typeParts = g.Where(c => !string.IsNullOrEmpty(c.Name)).Distinct().Take(12)
+                        .Select(c => c.StartLine > 0 && c.EndLine > 0 ? $"{c.Name}: {c.StartLine}-{c.EndLine}" : c.Name);
+                    sb.AppendLine($"    - {g.Key} ({string.Join(", ", typeParts)})");
                 }
                 if (proj.Classes.Select(c => (c.FilePath ?? "").Replace("\\", "/")).Distinct().Count() > maxFilesPerProject)
                     sb.AppendLine($"    - ... and more files (total {proj.Classes.Count} types in project)");
             }
 
-            // List key interfaces with paths
+            // List key interfaces with paths (and line ranges when available)
             if (proj.Interfaces.Any())
             {
                 var keyInterfaces = proj.Interfaces.Take(5);
                 sb.AppendLine($"  - Key Interfaces:");
                 foreach (var iface in keyInterfaces)
                 {
-                    sb.AppendLine($"    - {iface.Name} ({iface.FilePath})");
+                    var range = iface.StartLine > 0 && iface.EndLine > 0 ? $" lines {iface.StartLine}-{iface.EndLine}" : "";
+                    sb.AppendLine($"    - {iface.Name} ({iface.FilePath}{range})");
                 }
             }
         }
@@ -711,6 +747,94 @@ public class CodeAnalysisAgent
         sb.AppendLine("- Follow existing namespace/package/module conventions in each project");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Generate codebase context for the Coder agent, filtered by language so each language's coder
+    /// sees only relevant projects and conventions (like per-language analyzers).
+    /// </summary>
+    /// <param name="analysis">Full codebase analysis</param>
+    /// <param name="languageId">Language to include (csharp, go, react, python, rust). Projects with this language only.</param>
+    public string GenerateContextForCoder(CodebaseAnalysis analysis, string languageId)
+    {
+        var normalized = NormalizeLanguageForCoder(languageId);
+        var projects = analysis.Projects
+            .Where(p => NormalizeLanguageForCoder(string.IsNullOrEmpty(p.LanguageId) ? "csharp" : p.LanguageId) == normalized)
+            .OrderBy(p => p.Name)
+            .ToList();
+
+        if (projects.Count == 0)
+        {
+            return $"Codebase: {analysis.CodebaseName}. No projects found for language: {languageId}. Use conventions for {normalized}.";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Codebase (language: {normalized}) – {analysis.CodebaseName}");
+        sb.AppendLine($"Path: {analysis.CodebasePath}");
+        sb.AppendLine($"Projects in this language: {projects.Count}");
+        sb.AppendLine();
+
+        foreach (var proj in projects)
+        {
+            var lang = string.IsNullOrEmpty(proj.LanguageId) ? "csharp" : proj.LanguageId;
+            var ext = GetFileExtensionsForLanguage(lang);
+            sb.AppendLine($"### Project: **{proj.Name}** (language: {lang}, extensions: {ext})");
+            sb.AppendLine($"- Path: {proj.RelativePath}");
+            if (proj.ProjectReferences.Any())
+                sb.AppendLine($"- References: {string.Join(", ", proj.ProjectReferences)}");
+            if (proj.DetectedPatterns.Any())
+                sb.AppendLine($"- Patterns: {string.Join(", ", proj.DetectedPatterns)}");
+
+            const int maxFiles = 150;
+            var filesWithTypes = proj.Classes
+                .Where(c => !string.IsNullOrEmpty(c.FilePath))
+                .GroupBy(c => (c.FilePath ?? "").Replace("\\", "/"))
+                .OrderBy(g => g.Key)
+                .Take(maxFiles)
+                .ToList();
+            if (filesWithTypes.Any())
+            {
+                sb.AppendLine("- Files and types (line ranges for modification):");
+                foreach (var g in filesWithTypes)
+                {
+                    var typeParts = g.Where(c => !string.IsNullOrEmpty(c.Name)).Distinct().Take(12)
+                        .Select(c => c.StartLine > 0 && c.EndLine > 0 ? $"{c.Name}: {c.StartLine}-{c.EndLine}" : c.Name);
+                    sb.AppendLine($"  - {g.Key} ({string.Join(", ", typeParts)})");
+                }
+            }
+            if (proj.Interfaces.Any())
+            {
+                foreach (var iface in proj.Interfaces.Take(5))
+                {
+                    var range = iface.StartLine > 0 && iface.EndLine > 0 ? $" lines {iface.StartLine}-{iface.EndLine}" : "";
+                    sb.AppendLine($"  - Interface: {iface.Name} ({iface.FilePath}{range})");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("### Conventions (follow these):");
+        sb.AppendLine($"- Private fields: {analysis.Conventions.PrivateFieldPrefix}fieldName");
+        if (!string.IsNullOrEmpty(analysis.Conventions.TestFramework))
+            sb.AppendLine($"- Test framework: {analysis.Conventions.TestFramework}");
+        if (!string.IsNullOrEmpty(analysis.Conventions.NamingStyle))
+            sb.AppendLine($"- Naming: {analysis.Conventions.NamingStyle}");
+        sb.AppendLine($"- Async suffix: {(analysis.Conventions.UsesAsyncSuffix ? "Yes" : "No")}");
+        sb.AppendLine();
+        sb.AppendLine("→ Generate or modify files using ONLY the extensions and paths above. Match existing style and conventions.");
+
+        return sb.ToString();
+    }
+
+    private static string NormalizeLanguageForCoder(string languageId)
+    {
+        var l = (languageId ?? "").Trim().ToLowerInvariant();
+        if (l is "c#" or "csharp") return "csharp";
+        if (l == "go") return "go";
+        if (l is "react" or "typescript" or "ts") return "react";
+        if (l == "python") return "python";
+        if (l == "rust") return "rust";
+        return l;
     }
 
     /// <summary>

@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { knowledgeApi } from '../services/api';
-import { 
-  PatternSubcategory, 
+import {
+  PatternSubcategory,
   ErrorType,
   getPatternSubcategoryLabel,
-  getErrorTypeLabel 
+  getErrorTypeLabel
 } from '../types';
+import type { TemplateFileDto, PackageInfoDto } from '../types';
 
-type CreateType = 'pattern' | 'error';
+type CreateType = 'pattern' | 'error' | 'template' | 'insight';
 
 export default function KnowledgeCreate() {
   const { type } = useParams<{ type: CreateType }>();
@@ -38,7 +39,26 @@ export default function KnowledgeCreate() {
   const [fixCode, setFixCode] = useState('');
   const [preventionTips, setPreventionTips] = useState('');
 
+  // Template fields
+  const [description, setDescription] = useState('');
+  const [templateType, setTemplateType] = useState('WebAPI');
+  const [targetFramework, setTargetFramework] = useState('net8.0');
+  const [templateFilePath, setTemplateFilePath] = useState('');
+  const [templateFileContent, setTemplateFileContent] = useState('');
+  const [packagesStr, setPackagesStr] = useState('');
+  const [setupInstructions, setSetupInstructions] = useState('');
+
+  // Insight fields
+  const [agentName, setAgentName] = useState('');
+  const [promptInsight, setPromptInsight] = useState('');
+  const [optimalTemperature, setOptimalTemperature] = useState<string>('');
+  const [scenario, setScenario] = useState('');
+  const [improvementDescription, setImprovementDescription] = useState('');
+
   const isPattern = type === 'pattern';
+  const isError = type === 'error';
+  const isTemplate = type === 'template';
+  const isInsight = type === 'insight';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +81,7 @@ export default function KnowledgeCreate() {
           exampleUsage: exampleUsage || undefined,
           dependencies: dependencies.split(',').map(d => d.trim()).filter(d => d)
         });
-      } else {
+      } else if (isError) {
         await knowledgeApi.createError({
           title,
           errorType,
@@ -73,6 +93,42 @@ export default function KnowledgeCreate() {
           tags: tagList,
           language,
           preventionTips: preventionTips.split('\n').map(t => t.trim()).filter(t => t)
+        });
+      } else if (isTemplate) {
+        const templateFiles: TemplateFileDto[] = [];
+        if (templateFilePath.trim()) {
+          templateFiles.push({ path: templateFilePath.trim(), content: templateFileContent, isRequired: true });
+        }
+        const packages: PackageInfoDto[] = packagesStr.split(',').map(p => {
+          const trimmed = p.trim();
+          const at = trimmed.indexOf('@');
+          if (at > 0) {
+            return { name: trimmed.slice(0, at), version: trimmed.slice(at + 1), isRequired: true };
+          }
+          return { name: trimmed, isRequired: true };
+        }).filter(p => p.name);
+        await knowledgeApi.createTemplate({
+          title,
+          description,
+          tags: tagList,
+          language,
+          templateType: templateType.trim(),
+          targetFramework: targetFramework.trim(),
+          templateFiles,
+          packages,
+          setupInstructions: setupInstructions.trim() || undefined
+        });
+      } else if (isInsight) {
+        await knowledgeApi.createInsight({
+          title,
+          description,
+          tags: tagList,
+          language,
+          agentName: agentName.trim(),
+          promptInsight: promptInsight.trim() || undefined,
+          optimalTemperature: optimalTemperature === '' ? undefined : parseFloat(optimalTemperature),
+          scenario: scenario.trim(),
+          improvementDescription: improvementDescription.trim() || undefined
         });
       }
 
@@ -95,13 +151,18 @@ export default function KnowledgeCreate() {
           ← Back to Knowledge Base
         </button>
         <h1 className="text-2xl font-bold text-white">
-          {isPattern ? 'Add New Pattern' : 'Add New Error Fix'}
+          {isPattern && 'Add New Pattern'}
+          {isError && 'Add New Error Fix'}
+          {isTemplate && 'Add New Template'}
+          {isInsight && 'Add New Agent Insight'}
+          {!isPattern && !isError && !isTemplate && !isInsight && 'Add Knowledge Entry'}
         </h1>
         <p className="text-slate-400 text-sm mt-1">
-          {isPattern 
-            ? 'Document a successful code pattern for future reference'
-            : 'Document an error and its fix to help with future debugging'
-          }
+          {isPattern && 'Document a successful code pattern for future reference'}
+          {isError && 'Document an error and its fix to help with future debugging'}
+          {isTemplate && 'Add a project template for scaffolding (files, packages, setup)'}
+          {isInsight && 'Record an agent tuning insight (prompt, temperature, scenario)'}
+          {!isPattern && !isError && !isTemplate && !isInsight && 'Choose a type from Knowledge Base.'}
         </p>
       </div>
 
@@ -117,7 +178,7 @@ export default function KnowledgeCreate() {
         {/* Common Fields */}
         <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
           <h2 className="text-lg font-semibold text-white mb-4">Basic Information</h2>
-          
+
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
               Title *
@@ -148,41 +209,58 @@ export default function KnowledgeCreate() {
                 <option value="python">Python</option>
               </select>
             </div>
+            {(isPattern || isError) && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  {isPattern ? 'Subcategory' : 'Error Type'}
+                </label>
+                {isPattern ? (
+                  <select
+                    value={subcategory}
+                    onChange={(e) => setSubcategory(Number(e.target.value) as PatternSubcategory)}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {Object.values(PatternSubcategory)
+                      .filter(v => typeof v === 'number')
+                      .map(sub => (
+                        <option key={sub} value={sub}>
+                          {getPatternSubcategoryLabel(sub as PatternSubcategory)}
+                        </option>
+                      ))}
+                  </select>
+                ) : (
+                  <select
+                    value={errorType}
+                    onChange={(e) => setErrorType(Number(e.target.value) as ErrorType)}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  >
+                    {Object.values(ErrorType)
+                      .filter(v => typeof v === 'number')
+                      .map(type => (
+                        <option key={type} value={type}>
+                          {getErrorTypeLabel(type as ErrorType)}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+
+          {(isTemplate || isInsight) && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
-                {isPattern ? 'Subcategory' : 'Error Type'}
+                Description
               </label>
-              {isPattern ? (
-                <select
-                  value={subcategory}
-                  onChange={(e) => setSubcategory(Number(e.target.value) as PatternSubcategory)}
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                >
-                  {Object.values(PatternSubcategory)
-                    .filter(v => typeof v === 'number')
-                    .map(sub => (
-                      <option key={sub} value={sub}>
-                        {getPatternSubcategoryLabel(sub as PatternSubcategory)}
-                      </option>
-                    ))}
-                </select>
-              ) : (
-                <select
-                  value={errorType}
-                  onChange={(e) => setErrorType(Number(e.target.value) as ErrorType)}
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                >
-                  {Object.values(ErrorType)
-                    .filter(v => typeof v === 'number')
-                    .map(type => (
-                      <option key={type} value={type}>
-                        {getErrorTypeLabel(type as ErrorType)}
-                      </option>
-                    ))}
-                </select>
-              )}
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                placeholder="Short description of this template or insight..."
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
             </div>
-          </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
@@ -198,11 +276,139 @@ export default function KnowledgeCreate() {
           </div>
         </div>
 
+        {/* Template-specific fields */}
+        {isTemplate && (
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+            <h2 className="text-lg font-semibold text-white mb-4">Template Details</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Template Type *</label>
+                <input
+                  type="text"
+                  value={templateType}
+                  onChange={(e) => setTemplateType(e.target.value)}
+                  placeholder="e.g. WebAPI, Library, Console"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Target Framework *</label>
+                <input
+                  type="text"
+                  value={targetFramework}
+                  onChange={(e) => setTargetFramework(e.target.value)}
+                  placeholder="e.g. net8.0, go1.21"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Packages (comma separated, optional version: name@version)</label>
+              <input
+                type="text"
+                value={packagesStr}
+                onChange={(e) => setPackagesStr(e.target.value)}
+                placeholder="Microsoft.EntityFrameworkCore, Newtonsoft.Json@13.0.1"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Template File Path</label>
+              <input
+                type="text"
+                value={templateFilePath}
+                onChange={(e) => setTemplateFilePath(e.target.value)}
+                placeholder="e.g. Controllers/ValuesController.cs"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Template File Content</label>
+              <textarea
+                value={templateFileContent}
+                onChange={(e) => setTemplateFileContent(e.target.value)}
+                rows={10}
+                placeholder="// File content (placeholders like {{ProjectName}} allowed)..."
+                className="w-full px-4 py-2 bg-slate-900 border border-slate-600 rounded-lg text-slate-300 font-mono text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Setup Instructions</label>
+              <textarea
+                value={setupInstructions}
+                onChange={(e) => setSetupInstructions(e.target.value)}
+                rows={4}
+                placeholder="Steps to apply this template..."
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Insight-specific fields */}
+        {isInsight && (
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+            <h2 className="text-lg font-semibold text-white mb-4">Agent Insight Details</h2>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Agent Name *</label>
+              <input
+                type="text"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                required={isInsight}
+                placeholder="e.g. CoderAgent, PlannerAgent"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Scenario *</label>
+              <input
+                type="text"
+                value={scenario}
+                onChange={(e) => setScenario(e.target.value)}
+                required={isInsight}
+                placeholder="e.g. When modifying Go handlers, when generating C# repositories"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Prompt Insight</label>
+              <textarea
+                value={promptInsight}
+                onChange={(e) => setPromptInsight(e.target.value)}
+                rows={4}
+                placeholder="What prompt change improved results..."
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Optimal Temperature (0–1)</label>
+              <input
+                type="text"
+                value={optimalTemperature}
+                onChange={(e) => setOptimalTemperature(e.target.value)}
+                placeholder="e.g. 0.2"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Improvement Description</label>
+              <textarea
+                value={improvementDescription}
+                onChange={(e) => setImprovementDescription(e.target.value)}
+                rows={3}
+                placeholder="What improved (speed, accuracy, fewer retries)..."
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Pattern-specific fields */}
         {isPattern && (
           <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
             <h2 className="text-lg font-semibold text-white mb-4">Pattern Details</h2>
-            
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
                 Problem Description *
@@ -273,10 +479,10 @@ export default function KnowledgeCreate() {
         )}
 
         {/* Error-specific fields */}
-        {!isPattern && (
+        {isError && (
           <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
             <h2 className="text-lg font-semibold text-white mb-4">Error Details</h2>
-            
+
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
                 Error Message
@@ -370,7 +576,7 @@ export default function KnowledgeCreate() {
             disabled={loading}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {loading ? 'Creating...' : `Create ${isPattern ? 'Pattern' : 'Error Fix'}`}
+            {loading ? 'Creating...' : `Create ${isPattern ? 'Pattern' : isError ? 'Error Fix' : isTemplate ? 'Template' : isInsight ? 'Agent Insight' : 'Entry'}`}
           </button>
           <button
             type="button"

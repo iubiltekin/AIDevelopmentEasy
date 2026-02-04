@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Api.Models;
 using AIDevelopmentEasy.Api.Repositories.Interfaces;
 using AIDevelopmentEasy.Api.Services.Interfaces;
 using AIDevelopmentEasy.Core.Models;
@@ -110,6 +111,55 @@ public class KnowledgeService : IKnowledgeService
 
         _logger.LogInformation("[Knowledge] Captured {Count} patterns from pipeline {StoryId}",
             capturedCount, storyId);
+    }
+
+    /// <summary>
+    /// Capture agent usage insights from a completed pipeline.
+    /// Creates one AgentInsight per agent that was used (aggregated stats).
+    /// </summary>
+    public async Task CaptureAgentInsightsFromPipelineAsync(
+        string storyId,
+        string storyTitle,
+        IReadOnlyList<LLMCallResult> llmCalls,
+        CancellationToken cancellationToken = default)
+    {
+        if (llmCalls == null || llmCalls.Count == 0)
+        {
+            _logger.LogDebug("[Knowledge] No LLM calls to capture for insights");
+            return;
+        }
+
+        var byAgent = llmCalls
+            .Where(c => !string.IsNullOrWhiteSpace(c.AgentName))
+            .GroupBy(c => c.AgentName, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in byAgent)
+        {
+            var agentName = group.Key;
+            var calls = group.ToList();
+            var totalTokens = calls.Sum(c => c.TotalTokens);
+            var totalCost = calls.Sum(c => c.ActualCostUSD);
+            var totalDuration = TimeSpan.FromTicks(calls.Sum(c => c.Duration.Ticks));
+            var phases = string.Join(", ", calls.Select(c => c.Phase).Where(p => !string.IsNullOrEmpty(p)).Distinct());
+
+            var insight = new AgentInsight
+            {
+                Title = $"{agentName} – {storyTitle}",
+                Description = $"Pipeline completed successfully. Agent used in: {phases}.",
+                Tags = new List<string> { agentName.ToLowerInvariant(), "pipeline", storyId },
+                Language = "csharp",
+                AgentName = agentName,
+                Scenario = string.IsNullOrEmpty(phases) ? storyTitle : $"{storyTitle} ({phases})",
+                ImprovementDescription = $"Calls: {calls.Count}, Total tokens: {totalTokens:N0}, Cost: ${totalCost:F4}, Duration: {totalDuration.TotalSeconds:F1}s",
+                SourceStoryId = storyId,
+                IsManual = false
+            };
+
+            await _knowledgeRepository.CreateAsync(insight, cancellationToken);
+        }
+
+        _logger.LogInformation("[Knowledge] Captured {Count} agent insights from pipeline {StoryId}",
+            byAgent.Count(), storyId);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════

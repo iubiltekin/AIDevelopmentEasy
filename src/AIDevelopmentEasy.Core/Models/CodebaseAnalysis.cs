@@ -331,6 +331,14 @@ public class TypeInfo
     [JsonPropertyName("file_path")]
     public string FilePath { get; set; } = string.Empty;
 
+    /// <summary>1-based start line of this type in the file. 0 = not set.</summary>
+    [JsonPropertyName("start_line")]
+    public int StartLine { get; set; }
+
+    /// <summary>1-based end line of this type in the file. 0 = not set.</summary>
+    [JsonPropertyName("end_line")]
+    public int EndLine { get; set; }
+
     [JsonPropertyName("base_types")]
     public List<string> BaseTypes { get; set; } = new();
 

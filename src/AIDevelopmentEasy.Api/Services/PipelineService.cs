@@ -626,15 +626,18 @@ public class PipelineService : IPipelineService
                             await _notificationService.NotifyProgressAsync(storyId,
                                 $"[{projectGroup.ProjectName}] {actionType}: {task.Title}");
 
-                            // Use modification-aware coding if codebase is available
+                            // Use modification-aware coding if codebase is available; always pass codebase when present so Coder gets context
+                            var targetClassName = execution.TargetInfo?.Class ?? story?.TargetClass;
+                            if (task.IsModification && string.IsNullOrEmpty(targetClassName))
+                                targetClassName = InferClassNameFromFilePath(task.TargetFiles.FirstOrDefault() ?? task.FullPath);
                             AgentResponse response;
                             if (codebaseAnalysis != null && !string.IsNullOrEmpty(story?.CodebaseId))
                             {
-                                response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, ct);
+                                response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, targetClassName, ct);
                             }
                             else
                             {
-                                response = await ExecuteGenerationCodingAsync(task, projectState, ct);
+                                response = await ExecuteGenerationCodingAsync(task, projectState, codebaseAnalysis, ct);
                             }
 
                             if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
@@ -1095,6 +1098,7 @@ public class PipelineService : IPipelineService
                 prPhaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
                     ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
                     : null;
+                execution.AllLLMCalls.AddRange(execution.LLMCallsSinceLastApproval);
                 execution.LLMCallsSinceLastApproval.Clear();
 
                 await _notificationService.NotifyPhasePendingApprovalAsync(
@@ -1207,6 +1211,7 @@ public class PipelineService : IPipelineService
             phaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
                 ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
                 : null;
+            execution.AllLLMCalls.AddRange(execution.LLMCallsSinceLastApproval);
             execution.LLMCallsSinceLastApproval.Clear();
             phaseStatus.State = PhaseState.WaitingApproval;
 
@@ -1357,6 +1362,9 @@ public class PipelineService : IPipelineService
 
         // LLM calls since last approval (cleared when phase goes to WaitingApproval)
         public List<LLMCallResult> LLMCallsSinceLastApproval { get; set; } = new();
+
+        // All LLM calls during this run (accumulated for knowledge capture)
+        public List<LLMCallResult> AllLLMCalls { get; set; } = new();
     }
 
     /// <summary>
@@ -1998,13 +2006,15 @@ namespace {namespaceName}
     }
 
     /// <summary>
-    /// Execute coding with modification support
+    /// Execute coding with modification support.
+    /// When targetClassName is provided and analysis has line ranges, sends target_class and target_class_start_line/end_line to Coder.
     /// </summary>
     private async Task<AgentResponse> ExecuteModificationCodingAsync(
         TaskDto task,
         ProjectState projectState,
         string codebaseId,
         Core.Models.CodebaseAnalysis analysis,
+        string? targetClassName,
         CancellationToken ct)
     {
         // Check if this task is a modification task
@@ -2028,17 +2038,18 @@ namespace {namespaceName}
             if (string.IsNullOrEmpty(currentContent))
             {
                 _logger.LogWarning("[Coding] Could not load content for modification task: {FilePath}", task.FullPath);
-                // Fall back to generation mode
-                return await ExecuteGenerationCodingAsync(task, projectState, ct);
+                // Fall back to generation mode (pass analysis so Coder still gets codebase context)
+                return await ExecuteGenerationCodingAsync(task, projectState, analysis, ct);
             }
 
-            _logger.LogInformation("[Coding] Executing modification for: {FilePath}", task.FullPath ?? task.TargetFiles.FirstOrDefault());
+            var targetFile = task.TargetFiles.FirstOrDefault() ?? (task.FullPath != null ? Path.GetFileName(task.FullPath) : "unknown.cs");
+            _logger.LogInformation("[Coding] Executing modification for: {FilePath}, target class: {TargetClass}", task.FullPath ?? targetFile, targetClassName ?? "(infer)");
 
             var context = new Dictionary<string, string>
             {
                 ["is_modification"] = "true",
                 ["current_content"] = currentContent,
-                ["target_file"] = task.TargetFiles.FirstOrDefault() ?? (task.FullPath != null ? Path.GetFileName(task.FullPath) : "unknown.cs"),
+                ["target_file"] = targetFile,
                 ["task_index"] = task.Index.ToString(),
                 ["project_name"] = task.ProjectName ?? "default"
             };
@@ -2054,6 +2065,32 @@ namespace {namespaceName}
                 context["target_namespace"] = task.Namespace;
             }
 
+            // Codebase-aware: per-language context, target_language, and target class + line range for modification
+            if (analysis != null)
+            {
+                var targetLanguage = ResolveTaskLanguage(task, analysis);
+                context["target_language"] = targetLanguage;
+                context["codebase_context"] = _codeAnalysisAgent.GenerateContextForCoder(analysis, targetLanguage);
+
+                // Resolve target class and line range so Coder knows exactly which class/lines to modify
+                var relativePath = task.TargetFiles.FirstOrDefault() ?? task.FullPath;
+                if (!string.IsNullOrEmpty(relativePath))
+                {
+                    var normalizedPath = relativePath.Replace('\\', '/');
+                    var typeInFile = CodeAnalysisAgent.FindTypeInFile(analysis, normalizedPath, targetClassName);
+                    if (typeInFile != null)
+                    {
+                        context["target_class"] = typeInFile.Name;
+                        if (typeInFile.StartLine > 0 && typeInFile.EndLine > 0)
+                        {
+                            context["target_class_start_line"] = typeInFile.StartLine.ToString();
+                            context["target_class_end_line"] = typeInFile.EndLine.ToString();
+                            _logger.LogDebug("[Coding] Target class {Class} at lines {Start}-{End}", typeInFile.Name, typeInFile.StartLine, typeInFile.EndLine);
+                        }
+                    }
+                }
+            }
+
             var request = new AgentRequest
             {
                 Input = task.Description,
@@ -2065,16 +2102,18 @@ namespace {namespaceName}
         }
         else
         {
-            return await ExecuteGenerationCodingAsync(task, projectState, ct);
+            return await ExecuteGenerationCodingAsync(task, projectState, analysis, ct);
         }
     }
 
     /// <summary>
-    /// Execute standard code generation (non-modification)
+    /// Execute standard code generation (non-modification).
+    /// When codebase analysis is provided, injects codebase_context and target_language so Coder is codebase-aware and uses the right language prompt.
     /// </summary>
     private async Task<AgentResponse> ExecuteGenerationCodingAsync(
         TaskDto task,
         ProjectState projectState,
+        Core.Models.CodebaseAnalysis? codebaseAnalysis,
         CancellationToken ct)
     {
         var context = new Dictionary<string, string>
@@ -2091,6 +2130,15 @@ namespace {namespaceName}
             _logger.LogDebug("[Coding] Using namespace: {Namespace} for task {Index}", task.Namespace, task.Index);
         }
 
+        // Codebase-aware: per-language context and target_language so Coder uses codebase and correct prompt (create new)
+        if (codebaseAnalysis != null)
+        {
+            var targetLanguage = ResolveTaskLanguage(task, codebaseAnalysis);
+            context["target_language"] = targetLanguage;
+            context["codebase_context"] = _codeAnalysisAgent.GenerateContextForCoder(codebaseAnalysis, targetLanguage);
+            _logger.LogDebug("[Coding] Codebase context and target_language={Lang} set for task {Index}", targetLanguage, task.Index);
+        }
+
         var request = new AgentRequest
         {
             Input = task.Description,
@@ -2099,6 +2147,35 @@ namespace {namespaceName}
         };
 
         return await _coderAgent.RunAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Infer class/type name from file path (e.g. "Services/UserService.cs" -> "UserService").
+    /// </summary>
+    private static string? InferClassNameFromFilePath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return null;
+        var name = Path.GetFileNameWithoutExtension(filePath.Trim());
+        return string.IsNullOrEmpty(name) ? null : name;
+    }
+
+    /// <summary>
+    /// Resolve the language for a task from the codebase (task's project LanguageId). Normalized for Coder: csharp, go, react, python, rust.
+    /// </summary>
+    private static string ResolveTaskLanguage(TaskDto task, Core.Models.CodebaseAnalysis analysis)
+    {
+        var projectName = task.ProjectName;
+        var proj = analysis.Projects.FirstOrDefault(p =>
+            string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase));
+        var lang = proj?.LanguageId?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(lang)) lang = analysis.Summary?.Languages?.FirstOrDefault()?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(lang)) return "csharp";
+        if (lang is "c#" or "csharp") return "csharp";
+        if (lang == "go") return "go";
+        if (lang is "react" or "typescript" or "ts") return "react";
+        if (lang == "python") return "python";
+        if (lang == "rust") return "rust";
+        return lang;
     }
 
     /// <summary>
@@ -2281,6 +2358,7 @@ namespace {namespaceName}
             phaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
                 ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
                 : null;
+            execution.AllLLMCalls.AddRange(execution.LLMCallsSinceLastApproval);
             execution.LLMCallsSinceLastApproval.Clear();
 
             await _notificationService.NotifyPhasePendingApprovalAsync(storyId, PipelinePhase.UnitTesting,
@@ -2948,15 +3026,18 @@ Analyze the test failure and determine:
 
                 await _notificationService.NotifyProgressAsync(storyId, $"Fixing: {task.Title}");
 
-                // Use modification-aware coding if codebase is available
+                // Use modification-aware coding if codebase is available; always pass codebase when present
                 AgentResponse response;
+                var targetClassNameRetry = execution.TargetInfo?.Class ?? story?.TargetClass;
+                if (task.IsModification && string.IsNullOrEmpty(targetClassNameRetry))
+                    targetClassNameRetry = InferClassNameFromFilePath(task.TargetFiles.FirstOrDefault() ?? task.FullPath);
                 if (codebaseAnalysis != null && !string.IsNullOrEmpty(story?.CodebaseId))
                 {
-                    response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, ct);
+                    response = await ExecuteModificationCodingAsync(task, projectState, story.CodebaseId, codebaseAnalysis, targetClassNameRetry, ct);
                 }
                 else
                 {
-                    response = await ExecuteGenerationCodingAsync(task, projectState, ct);
+                    response = await ExecuteGenerationCodingAsync(task, projectState, codebaseAnalysis, ct);
                 }
 
                 if (response.Success && response.Data.TryGetValue("filename", out var filename) &&
@@ -3274,6 +3355,15 @@ Analyze the test failure and determine:
         {
             await _knowledgeService.CaptureFromCompletedPipelineAsync(
                 storyId, generatedFiles, cancellationToken);
+        }
+
+        // Capture agent insights from LLM call history (feeds knowledge-base/insights)
+        if (execution.AllLLMCalls.Count > 0)
+        {
+            var story = await _storyRepository.GetByIdAsync(storyId, cancellationToken);
+            var storyTitle = story?.Name ?? storyId;
+            await _knowledgeService.CaptureAgentInsightsFromPipelineAsync(
+                storyId, storyTitle, execution.AllLLMCalls, cancellationToken);
         }
 
         // Capture individual task implementations as patterns

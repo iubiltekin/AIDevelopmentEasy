@@ -28,11 +28,21 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         _logger = logger;
     }
 
+    /// <summary>Returns true if the path is under a vendor directory (Go dependency dir); such paths are excluded from analysis.</summary>
+    private static bool IsUnderVendor(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        var normalized = path.Replace('\\', '/');
+        return normalized.Contains("/vendor/", StringComparison.Ordinal);
+    }
+
     public bool CanAnalyze(string codebasePath)
     {
         if (!Directory.Exists(codebasePath))
             return false;
-        var goModFiles = Directory.GetFiles(codebasePath, "go.mod", SearchOption.AllDirectories);
+        var goModFiles = Directory.GetFiles(codebasePath, "go.mod", SearchOption.AllDirectories)
+            .Where(f => !IsUnderVendor(f))
+            .ToArray();
         return goModFiles.Length > 0;
     }
 
@@ -51,7 +61,7 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         };
 
         var goModFiles = Directory.GetFiles(codebasePath, "go.mod", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "vendor" + Path.DirectorySeparatorChar))
+            .Where(f => !IsUnderVendor(f))
             .ToList();
 
         foreach (var goModPath in goModFiles)
@@ -162,7 +172,7 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         ParseGoModRequires(content, projectInfo);
 
         var goFiles = Directory.GetFiles(moduleDir, "*.go", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "vendor" + Path.DirectorySeparatorChar))
+            .Where(f => !IsUnderVendor(f))
             .ToList();
 
         foreach (var goFile in goFiles)
@@ -181,21 +191,27 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
                 foreach (Match m in TypeStructRegex.Matches(fileContent))
                 {
                     var name = m.Groups[1].Value;
+                    var (startLine, endLine) = LineRangeHelper.GetBraceTypeLineRange(fileContent, m.Index);
                     projectInfo.Classes.Add(new TypeInfo
                     {
                         Name = name,
                         Namespace = pkgName,
                         FilePath = relativePath,
+                        StartLine = startLine,
+                        EndLine = endLine,
                         DetectedPattern = InferGoPattern(name, fileContent)
                     });
                 }
                 foreach (Match m in TypeInterfaceRegex.Matches(fileContent))
                 {
+                    var (startLine, endLine) = LineRangeHelper.GetBraceTypeLineRange(fileContent, m.Index);
                     projectInfo.Interfaces.Add(new TypeInfo
                     {
                         Name = m.Groups[1].Value,
                         Namespace = pkgName,
-                        FilePath = relativePath
+                        FilePath = relativePath,
+                        StartLine = startLine,
+                        EndLine = endLine
                     });
                 }
             }

@@ -857,6 +857,14 @@ export interface ProjectTemplateDto extends KnowledgeEntryDto {
   setupInstructions?: string;
 }
 
+export interface AgentInsightDto extends KnowledgeEntryDto {
+  agentName: string;
+  promptInsight?: string;
+  optimalTemperature?: number;
+  scenario: string;
+  improvementDescription?: string;
+}
+
 export interface TemplateFileDto {
   path: string;
   content: string;
@@ -934,6 +942,30 @@ export interface CreateErrorRequest {
   tags: string[];
   language: string;
   preventionTips: string[];
+}
+
+export interface CreateTemplateRequest {
+  title: string;
+  description: string;
+  tags: string[];
+  language: string;
+  templateType: string;
+  targetFramework: string;
+  templateFiles: TemplateFileDto[];
+  packages: PackageInfoDto[];
+  setupInstructions?: string;
+}
+
+export interface CreateInsightRequest {
+  title: string;
+  description: string;
+  tags: string[];
+  language: string;
+  agentName: string;
+  promptInsight?: string;
+  optimalTemperature?: number;
+  scenario: string;
+  improvementDescription?: string;
 }
 
 export interface SearchKnowledgeRequest {

@@ -284,6 +284,46 @@ public class KnowledgeController : ControllerBase
     // ═══════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
+    /// Create a new project template
+    /// </summary>
+    [HttpPost("templates")]
+    public async Task<ActionResult<ProjectTemplateDto>> CreateTemplate(
+        [FromBody] CreateTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            return BadRequest(new { error = "Title is required" });
+
+        var template = new ProjectTemplate
+        {
+            Title = request.Title,
+            Description = request.Description ?? string.Empty,
+            Tags = request.Tags ?? new List<string>(),
+            Language = request.Language ?? "csharp",
+            TemplateType = request.TemplateType ?? string.Empty,
+            TargetFramework = request.TargetFramework ?? string.Empty,
+            TemplateFiles = request.TemplateFiles?.Select(f => new TemplateFile
+            {
+                Path = f.Path,
+                Content = f.Content,
+                IsRequired = f.IsRequired
+            }).ToList() ?? new List<TemplateFile>(),
+            Packages = request.Packages?.Select(p => new PackageInfo
+            {
+                Name = p.Name,
+                Version = p.Version,
+                IsRequired = p.IsRequired
+            }).ToList() ?? new List<PackageInfo>(),
+            SetupInstructions = request.SetupInstructions,
+            IsManual = true
+        };
+
+        var created = (ProjectTemplate)await _knowledgeRepository.CreateAsync(template, cancellationToken);
+        _logger.LogInformation("Created template entry: {Id} - {Title}", created.Id, created.Title);
+        return CreatedAtAction(nameof(GetTemplate), new { id = created.Id }, created.ToDto());
+    }
+
+    /// <summary>
     /// Get all project templates
     /// </summary>
     [HttpGet("templates")]
@@ -317,6 +357,40 @@ public class KnowledgeController : ControllerBase
             return NotFound(new { error = $"Template not found: {id}" });
 
         return Ok(template.ToDto());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // Agent Insights
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Create a new agent insight
+    /// </summary>
+    [HttpPost("insights")]
+    public async Task<ActionResult<AgentInsightDto>> CreateInsight(
+        [FromBody] CreateInsightRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            return BadRequest(new { error = "Title is required" });
+
+        var insight = new AgentInsight
+        {
+            Title = request.Title,
+            Description = request.Description ?? string.Empty,
+            Tags = request.Tags ?? new List<string>(),
+            Language = request.Language ?? "csharp",
+            AgentName = request.AgentName ?? string.Empty,
+            PromptInsight = request.PromptInsight,
+            OptimalTemperature = request.OptimalTemperature,
+            Scenario = request.Scenario ?? string.Empty,
+            ImprovementDescription = request.ImprovementDescription,
+            IsManual = true
+        };
+
+        var created = (AgentInsight)await _knowledgeRepository.CreateAsync(insight, cancellationToken);
+        _logger.LogInformation("Created insight entry: {Id} - {Title}", created.Id, created.Title);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created.ToDto());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════

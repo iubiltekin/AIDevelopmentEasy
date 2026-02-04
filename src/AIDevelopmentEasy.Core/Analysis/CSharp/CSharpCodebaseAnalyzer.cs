@@ -442,11 +442,14 @@ public class CSharpCodebaseAnalyzer : ICodebaseAnalyzer
                 var modifiers = new List<string>();
                 if (!string.IsNullOrEmpty(match.Groups[1].Value)) modifiers.Add(match.Groups[1].Value);
                 if (!string.IsNullOrEmpty(match.Groups[2].Value)) modifiers.Add(match.Groups[2].Value);
+                var (startLine, endLine) = GetTypeLineRange(content, match.Index);
                 var typeInfo = new TypeInfo
                 {
                     Name = className,
                     Namespace = fileNamespace ?? "",
                     FilePath = relativePath,
+                    StartLine = startLine,
+                    EndLine = endLine,
                     BaseTypes = baseTypes,
                     Modifiers = modifiers,
                     DetectedPattern = DetectTypePattern(className, baseTypes, content)
@@ -461,11 +464,14 @@ public class CSharpCodebaseAnalyzer : ICodebaseAnalyzer
                 var baseTypes = match.Groups[3].Success ? match.Groups[3].Value.Split(',').Select(t => t.Trim()).ToList() : new List<string>();
                 var modifiers = new List<string>();
                 if (!string.IsNullOrEmpty(match.Groups[1].Value)) modifiers.Add(match.Groups[1].Value);
+                var (startLine, endLine) = GetTypeLineRange(content, match.Index);
                 projectInfo.Interfaces.Add(new TypeInfo
                 {
                     Name = interfaceName,
                     Namespace = fileNamespace ?? "",
                     FilePath = relativePath,
+                    StartLine = startLine,
+                    EndLine = endLine,
                     BaseTypes = baseTypes,
                     Modifiers = modifiers,
                     DetectedPattern = DetectTypePattern(interfaceName, baseTypes, content)
@@ -486,6 +492,9 @@ public class CSharpCodebaseAnalyzer : ICodebaseAnalyzer
         }
         return null;
     }
+
+    private static (int startLine, int endLine) GetTypeLineRange(string content, int declarationIndex) =>
+        LineRangeHelper.GetBraceTypeLineRange(content, declarationIndex);
 
     private void CalculateNamespaceMappings(ProjectInfo projectInfo, List<(string Namespace, string RelativeFolderPath)> pairs)
     {

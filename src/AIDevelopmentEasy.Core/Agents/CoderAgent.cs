@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using AIDevelopmentEasy.Core.Agents.Base;
+using AIDevelopmentEasy.Core.Services;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Logging;
 
@@ -7,15 +9,15 @@ namespace AIDevelopmentEasy.Core.Agents;
 /// <summary>
 /// Coder Agent - Responsible for code generation.
 /// Takes subtasks from the Planner and generates source code for each.
+/// Language-agnostic: prompt is loaded from prompts/coder-{language}.md per language (csharp, go, react, python, rust). No fallbacks; missing prompt throws.
 /// </summary>
 public class CoderAgent : BaseAgent
 {
     public override string Name => "Coder";
     public override string Role => "Senior Software Developer - Implements code for given tasks";
-    protected override string? PromptFileName => IsCSharp ? "coder-csharp" : "coder-generic";
+    protected override string? PromptFileName => null;
 
     private readonly string _targetLanguage;
-    private bool IsCSharp => _targetLanguage.ToLower() == "csharp" || _targetLanguage.ToLower() == "c#";
 
     public CoderAgent(
         OpenAIClient openAIClient,
@@ -24,7 +26,54 @@ public class CoderAgent : BaseAgent
         ILogger<CoderAgent>? logger = null)
         : base(openAIClient, deploymentName, logger)
     {
-        _targetLanguage = targetLanguage;
+        _targetLanguage = targetLanguage ?? "csharp";
+    }
+
+    /// <summary>
+    /// Resolves target language to prompt file suffix. Throws if language is not supported.
+    /// </summary>
+    private static string GetCoderPromptNameForLanguage(string targetLanguage)
+    {
+        var lang = (targetLanguage ?? "").Trim().ToLowerInvariant();
+        if (lang is "c#" or "csharp") return "csharp";
+        if (lang == "go") return "go";
+        if (lang is "react" or "typescript" or "ts") return "react";
+        if (lang == "python") return "python";
+        if (lang == "rust") return "rust";
+        throw new FileNotFoundException(
+            $"Unsupported coder language: '{targetLanguage}'. Supported: csharp, go, react, python, rust. Add prompts/coder-{{lang}}.md for the language.");
+    }
+
+    /// <summary>
+    /// Code block language identifier for modification user prompt (markdown code fence).
+    /// </summary>
+    private static string GetCodeBlockLanguageForPrompt(string langKey)
+    {
+        return langKey switch
+        {
+            "csharp" => "csharp",
+            "go" => "go",
+            "react" => "tsx",
+            "python" => "python",
+            "rust" => "rust",
+            _ => "text"
+        };
+    }
+
+    /// <summary>
+    /// Primary file extension for the language (for default filename when not inferred).
+    /// </summary>
+    private static string GetFileExtensionForLanguage(string langKey)
+    {
+        return langKey switch
+        {
+            "csharp" => ".cs",
+            "go" => ".go",
+            "react" => ".tsx",
+            "python" => ".py",
+            "rust" => ".rs",
+            _ => ".txt"
+        };
     }
 
     /// <summary>
@@ -43,123 +92,19 @@ public class CoderAgent : BaseAgent
 
     protected override string GetSystemPrompt()
     {
-        if (IsCSharp)
-        {
-            return base.GetSystemPrompt();
-        }
-
-        // For non-C# languages, use generic prompt with variable substitution
-        return Services.PromptLoader.Instance.LoadPromptRequired(
-            "coder-generic",
-            new Dictionary<string, string> { ["LANGUAGE"] = _targetLanguage });
+        var langKey = GetCoderPromptNameForLanguage(_targetLanguage);
+        var promptName = $"coder-{langKey}";
+        return PromptLoader.Instance.LoadPromptRequired(promptName);
     }
 
-    protected override string GetFallbackPrompt()
-    {
-        if (IsCSharp)
-        {
-            return @"You are a Senior C# Developer Agent specializing in .NET Framework 4.6.2. Your job is to write clean, efficient, and well-documented code.
-
-Your responsibilities:
-1. Implement the given task completely
-2. Follow C# and .NET best practices
-3. Add XML documentation comments
-4. Handle exceptions gracefully
-5. Write modular, reusable code
-
-Guidelines:
-- Target .NET Framework 4.6.2 (NOT .NET Core or .NET 5+)
-- Use meaningful variable and method names (PascalCase for public, camelCase for private)
-- Keep methods small and focused (Single Responsibility Principle)
-- Use proper C# conventions (properties, events, etc.)
-- Include necessary using statements at the top
-- Use explicit types (avoid var when type is not obvious)
-- Implement IDisposable when managing unmanaged resources
-
-Namespace Handling (CRITICAL):
-- When a target namespace is specified, ALWAYS use it exactly as provided
-- The namespace should match the folder structure (e.g., Picus.Common.Helpers for Helpers/ folder)
-- Do NOT invent or modify the namespace
-
-.NET Framework 4.6.2 Specific:
-- Use System.Net.Http.HttpClient (not HttpClientFactory)
-- Use Task-based async/await patterns
-- Use System.IO for file operations
-- Use Newtonsoft.Json for JSON (NOT System.Text.Json)
-- Console apps should have static void Main() or static async Task Main()
-
-Modern C# Features (supported via MSBuild with latest LangVersion):
-- Use nameof() operator for parameter names
-- Use string interpolation ($"")
-- Use null-conditional operators (?. and ??)
-- Use expression-bodied members where appropriate
-- Use auto-property initializers
-- Use pattern matching where helpful
-
-Testing with NUnit and FluentAssertions:
-- Use NUnit framework: using NUnit.Framework;
-- Use FluentAssertions: using FluentAssertions;
-- Mark test classes with [TestFixture] attribute
-- Mark test methods with [Test] attribute
-- Use [TestCase(arg1, arg2)] for parameterized tests
-- Use FluentAssertions: result.Should().Be(expected), result.Should().NotBeNull(), action.Should().Throw<T>()
-- Follow Arrange-Act-Assert pattern
-- Naming: MethodName_Scenario_ExpectedResult
-- For console demo apps, use static void Main() with Console.WriteLine
-
-Output Format:
-- Output ONLY the code in a markdown code block
-- Include ALL necessary using statements
-- If it's a class, include the full class definition WITH CORRECT NAMESPACE
-- If modifying existing code, output the complete updated file
-
-```csharp
-using System;
-
-namespace ProjectName.FolderName  // Use the provided namespace exactly
-{
     /// <summary>
-    /// XML documentation
+    /// Language to use for this request: from context (codebase-aware, per-task) or agent default.
     /// </summary>
-    public class ClassName
+    private string GetEffectiveLanguage(AgentRequest request)
     {
-        // Your implementation here
-    }
-}
-```
-
-IMPORTANT: Output ONLY code in a single code block. No explanations before or after unless as code comments.";
-        }
-
-        // Generic language fallback
-        return $@"You are a Senior {_targetLanguage.ToUpper()} Developer Agent. Your job is to write clean, efficient, and well-documented code.
-
-Your responsibilities:
-1. Implement the given task completely
-2. Follow best practices and coding standards
-3. Add appropriate comments and docstrings
-4. Handle edge cases and errors gracefully
-5. Write modular, reusable code
-
-Guidelines:
-- Use meaningful variable and function names
-- Keep functions small and focused
-- Include type hints where applicable
-- Consider performance implications
-- Follow {_targetLanguage} conventions and idioms
-
-Output Format:
-- Output ONLY the code
-- Use markdown code blocks with language identifier
-- Include necessary imports at the top
-- If modifying existing code, output the complete updated file
-
-Example:
-```{_targetLanguage}
-# Your code here
-```
-
-IMPORTANT: Output ONLY code in a single code block. No explanations before or after unless as code comments.";
+        if (request.Context != null && request.Context.TryGetValue("target_language", out var tl) && !string.IsNullOrEmpty(tl))
+            return tl.Trim();
+        return _targetLanguage;
     }
 
     public override async Task<AgentResponse> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
@@ -180,32 +125,40 @@ IMPORTANT: Output ONLY code in a single code block. No explanations before or af
     /// </summary>
     private async Task<AgentResponse> RunGenerationAsync(AgentRequest request, CancellationToken cancellationToken)
     {
-        _logger?.LogInformation("[Coder] Starting code generation for task: {Task}",
-            request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
+        var effectiveLang = GetEffectiveLanguage(request);
+        _logger?.LogInformation("[Coder] Starting code generation for task (language: {Lang}): {Task}",
+            effectiveLang, request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
 
         try
         {
-            // Build context from existing codebase
-            var contextSection = "";
+            // Codebase context (from analysis, per-language) – Coder is codebase-aware like per-language analyzers
+            var codebaseSection = "";
+            if (request.Context != null && request.Context.TryGetValue("codebase_context", out var codebaseCtx) && !string.IsNullOrEmpty(codebaseCtx))
+            {
+                codebaseSection = "\n\nCODEBASE (structure, conventions, relevant files – follow these):\n" + codebaseCtx + "\n";
+            }
+
+            // Build context from existing files generated so far in this run
+            var existingSection = "";
             if (request.ProjectState?.Codebase.Count > 0)
             {
-                contextSection = "\n\nEXISTING CODEBASE:\n";
+                existingSection = "\n\nEXISTING FILES (already generated this run):\n";
                 foreach (var (fname, existingCode) in request.ProjectState.Codebase)
                 {
-                    contextSection += $"\n--- {fname} ---\n{existingCode}\n";
+                    existingSection += $"\n--- {fname} ---\n{existingCode}\n";
                 }
             }
 
             // Get any additional context (like plan summary)
             var planContext = "";
-            if (request.Context.TryGetValue("plan_summary", out var summary))
+            if (request.Context != null && request.Context.TryGetValue("plan_summary", out var summary))
             {
                 planContext = $"\n\nPROJECT CONTEXT:\n{summary}\n";
             }
 
             // Get target namespace - CRITICAL for correct code generation
             var namespaceSection = "";
-            if (request.Context.TryGetValue("target_namespace", out var targetNs) && !string.IsNullOrEmpty(targetNs))
+            if (request.Context != null && request.Context.TryGetValue("target_namespace", out var targetNs) && !string.IsNullOrEmpty(targetNs))
             {
                 namespaceSection = $@"
 
@@ -225,7 +178,7 @@ DO NOT use any other namespace. DO NOT shorten or modify this namespace.
 
             // Get project name for additional context
             var projectContext = "";
-            if (request.Context.TryGetValue("project_name", out var projectName) && !string.IsNullOrEmpty(projectName))
+            if (request.Context != null && request.Context.TryGetValue("project_name", out var projectName) && !string.IsNullOrEmpty(projectName))
             {
                 projectContext = $"\nTARGET PROJECT: {projectName}\n";
             }
@@ -234,18 +187,23 @@ DO NOT use any other namespace. DO NOT shorten or modify this namespace.
 
 TASK:
 {request.Input}
-{projectContext}{namespaceSection}{planContext}{contextSection}
+{projectContext}{namespaceSection}{planContext}{codebaseSection}{existingSection}
 Generate the complete code for this task. Make sure to:
 1. Include all necessary imports/using statements
 2. Use the EXACT namespace specified above (if provided)
-3. Handle potential errors
-4. Add helpful comments
-5. Follow best practices
+3. Match codebase conventions and structure when codebase section is present
+4. Handle potential errors
+5. Add helpful comments
+6. Follow best practices
 
 Output the code in a markdown code block.";
 
+            var langKey = GetCoderPromptNameForLanguage(effectiveLang);
+            var systemPrompt = BuildSystemPromptWithStandards(request.ProjectState,
+                PromptLoader.Instance.LoadPromptRequired($"coder-{langKey}"));
+
             var (content, tokens) = await CallLLMAsync(
-                BuildSystemPromptWithStandards(request.ProjectState),
+                systemPrompt,
                 userPrompt,
                 temperature: 0.2f,  // Lower temperature for more deterministic code
                 maxTokens: 4000,
@@ -253,11 +211,11 @@ Output the code in a markdown code block.";
 
             _logger?.LogInformation("[Coder] Raw response:\n{Content}", content);
 
-            // Extract the code
-            var code = ExtractCode(content, _targetLanguage);
+            // Extract the code (use code block language for correct fence detection)
+            var code = ExtractCode(content, GetCodeBlockLanguageForPrompt(langKey));
 
             // Try to determine the target filename
-            var targetFile = DetermineTargetFile(request, code);
+            var targetFile = DetermineTargetFile(request, code, effectiveLang);
 
             // Update project state
             if (request.ProjectState != null)
@@ -278,7 +236,7 @@ Output the code in a markdown code block.";
                 {
                     ["filename"] = targetFile,
                     ["code"] = code,
-                    ["language"] = _targetLanguage,
+                    ["language"] = effectiveLang,
                     ["is_new_file"] = true
                 },
                 TokensUsed = tokens
@@ -300,15 +258,16 @@ Output the code in a markdown code block.";
     /// </summary>
     private async Task<AgentResponse> RunModificationAsync(AgentRequest request, CancellationToken cancellationToken)
     {
-        _logger?.LogInformation("[Coder] Starting code MODIFICATION for task: {Task}",
-            request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
+        var effectiveLang = GetEffectiveLanguage(request);
+        _logger?.LogInformation("[Coder] Starting code MODIFICATION for task (language: {Lang}): {Task}",
+            effectiveLang, request.Input.Length > 100 ? request.Input[..100] + "..." : request.Input);
 
         try
         {
             // Get the current file content
-            var currentContent = request.Context.TryGetValue("current_content", out var content) ? content : null;
-            var targetFile = request.Context.TryGetValue("target_file", out var tf) ? tf : null;
-            var fullPath = request.Context.TryGetValue("full_path", out var fp) ? fp : null;
+            var currentContent = request.Context != null && request.Context.TryGetValue("current_content", out var content) ? content : null;
+            var targetFile = request.Context != null && request.Context.TryGetValue("target_file", out var tf) ? tf : null;
+            var fullPath = request.Context != null && request.Context.TryGetValue("full_path", out var fp) ? fp : null;
 
             if (string.IsNullOrEmpty(currentContent))
             {
@@ -319,10 +278,16 @@ Output the code in a markdown code block.";
                 };
             }
 
-            var userPrompt = BuildModificationPrompt(request.Input, currentContent, targetFile);
+            var userPrompt = BuildModificationPrompt(request, request.Input, currentContent, targetFile, effectiveLang);
+
+            // Optional codebase context for modification (same per-language context)
+            if (request.Context != null && request.Context.TryGetValue("codebase_context", out var codebaseCtx) && !string.IsNullOrEmpty(codebaseCtx))
+            {
+                userPrompt = userPrompt + "\n\nCODEBASE (conventions and structure – follow these when modifying):\n" + codebaseCtx;
+            }
 
             var (responseContent, tokens) = await CallLLMAsync(
-                GetModificationSystemPrompt(),
+                GetModificationSystemPrompt(effectiveLang),
                 userPrompt,
                 temperature: 0.1f,  // Very low temperature for accurate modifications
                 maxTokens: 8000,    // Larger for complete file output
@@ -330,8 +295,9 @@ Output the code in a markdown code block.";
 
             _logger?.LogInformation("[Coder] Modification response:\n{Content}", responseContent);
 
+            var langKey = GetCoderPromptNameForLanguage(effectiveLang);
             // Extract the modified code
-            var modifiedCode = ExtractCode(responseContent, _targetLanguage);
+            var modifiedCode = ExtractCode(responseContent, GetCodeBlockLanguageForPrompt(langKey));
 
             // Update project state with modified code
             if (request.ProjectState != null && !string.IsNullOrEmpty(targetFile))
@@ -355,7 +321,7 @@ Output the code in a markdown code block.";
                     ["full_path"] = fullPath ?? "",
                     ["code"] = modifiedCode,
                     ["original_code"] = currentContent,
-                    ["language"] = _targetLanguage,
+                    ["language"] = effectiveLang,
                     ["is_new_file"] = false,
                     ["is_modification"] = true
                 },
@@ -373,73 +339,48 @@ Output the code in a markdown code block.";
         }
     }
 
-    private string GetModificationSystemPrompt()
+    private string GetModificationSystemPrompt(string? language = null)
     {
-        return @"You are a **Senior Code Modification Specialist**. Your task is to modify existing source code files according to specific requirements while preserving all existing functionality.
-
-## Critical Rules
-
-1. **PRESERVE ALL EXISTING CODE**: Do not remove or change any existing code unless specifically instructed to
-2. **COMPLETE FILE OUTPUT**: Always output the ENTIRE modified file, not just the changes
-3. **MAINTAIN FORMATTING**: Keep the same indentation, spacing, and style as the original file
-4. **KEEP IMPORTS**: Preserve all existing using/import statements, add new ones if needed
-5. **NO COMMENTS ABOUT CHANGES**: Don't add comments like ""// Modified"" or ""// Added"" - just make the changes
-
-## Modification Guidelines
-
-When adding new code:
-- Add new methods after existing methods in the same class
-- Add new properties after existing properties
-- Add new using statements at the top, alphabetically sorted
-- Follow the naming conventions visible in the existing code
-
-When updating existing code:
-- Keep the same method signature unless explicitly asked to change it
-- Preserve all existing functionality
-- Update only the specific parts mentioned in the task
-
-## Output Format
-
-Output ONLY the complete modified file in a code block:
-
-```csharp
-// The complete file with all modifications applied
-// Including ALL original code plus changes
-```
-
-**IMPORTANT**: 
-- Output ONLY code in a single code block
-- The code block must contain the ENTIRE file, not just changed parts
-- No explanations before or after the code block";
+        var lang = language ?? _targetLanguage;
+        var langKey = GetCoderPromptNameForLanguage(lang);
+        var promptName = $"coder-modification-{langKey}";
+        return PromptLoader.Instance.LoadPromptRequired(promptName);
     }
 
-    private string BuildModificationPrompt(string taskDescription, string currentContent, string? fileName)
+    private string BuildModificationPrompt(AgentRequest request, string taskDescription, string currentContent, string? fileName, string? effectiveLang = null)
     {
-        return $@"# MODIFICATION TASK
+        var lang = effectiveLang ?? _targetLanguage;
+        var langKey = GetCoderPromptNameForLanguage(lang);
+        var codeLang = GetCodeBlockLanguageForPrompt(langKey);
+        var fileNameLine = string.IsNullOrEmpty(fileName) ? "" : $"File: {fileName}\n";
 
-{taskDescription}
+        string targetClassSection = "";
+        string targetClassInstructions = "";
+        if (request.Context != null
+            && request.Context.TryGetValue("target_class", out var tc) && !string.IsNullOrEmpty(tc)
+            && request.Context.TryGetValue("target_class_start_line", out var startLine) && !string.IsNullOrEmpty(startLine)
+            && request.Context.TryGetValue("target_class_end_line", out var endLine) && !string.IsNullOrEmpty(endLine))
+        {
+            targetClassSection = $"## TARGET\n\nModify the class **{tc}** (lines {startLine}–{endLine}).";
+            targetClassInstructions = "\n6. Prefer making changes only within the indicated class and line range when possible.";
+        }
 
-# CURRENT FILE CONTENT
-{(string.IsNullOrEmpty(fileName) ? "" : $"File: {fileName}\n")}
-```csharp
-{currentContent}
-```
-
-# INSTRUCTIONS
-
-1. Read the current file content above carefully
-2. Apply the modifications described in the task
-3. Output the COMPLETE modified file (not just the changes)
-4. Preserve ALL existing code that is not being modified
-5. Maintain the same code style and formatting
-
-Output the complete modified file in a markdown code block.";
+        return PromptLoader.Instance.LoadPromptRequired("coder-modification-user", new Dictionary<string, string>
+        {
+            ["TASK"] = taskDescription,
+            ["FILE_NAME"] = fileNameLine,
+            ["CURRENT_CONTENT"] = currentContent,
+            ["CODE_LANG"] = codeLang,
+            ["TARGET_CLASS_SECTION"] = targetClassSection,
+            ["TARGET_CLASS_INSTRUCTIONS"] = targetClassInstructions
+        });
     }
 
-    private string DetermineTargetFile(AgentRequest request, string code)
+    private string DetermineTargetFile(AgentRequest request, string code, string? effectiveLanguage = null)
     {
-        var isCSharp = _targetLanguage.ToLower() == "csharp" || _targetLanguage.ToLower() == "c#";
-        var extension = isCSharp ? ".cs" : ".py";
+        var lang = effectiveLanguage ?? _targetLanguage;
+        var langKey = GetCoderPromptNameForLanguage(lang);
+        var extension = GetFileExtensionForLanguage(langKey);
 
         // Check if filename is provided in context
         if (request.Context.TryGetValue("target_file", out var contextFile) && !string.IsNullOrEmpty(contextFile))
@@ -455,48 +396,53 @@ Output the complete modified file in a markdown code block.";
                 return task.TargetFiles[0];
         }
 
-        if (isCSharp)
+        switch (langKey)
         {
-            // Try to infer from C# code content
-            if (code.Contains("static void Main(") || code.Contains("static async Task Main("))
-                return "Program.cs";
-
-            // Try to extract class name
-            var classMatch = System.Text.RegularExpressions.Regex.Match(code, @"(?:public|internal)\s+(?:static\s+)?class\s+(\w+)");
-            if (classMatch.Success)
-            {
-                return $"{classMatch.Groups[1].Value}.cs";
-            }
-
-            // Try to extract interface name
-            var interfaceMatch = System.Text.RegularExpressions.Regex.Match(code, @"(?:public|internal)\s+interface\s+(\w+)");
-            if (interfaceMatch.Success)
-            {
-                return $"{interfaceMatch.Groups[1].Value}.cs";
-            }
-        }
-        else
-        {
-            // Python inference
-            if (code.Contains("def main(") || code.Contains("if __name__"))
-                return "main.py";
-            if (code.Contains("class "))
-            {
-                var classIndex = code.IndexOf("class ");
-                if (classIndex >= 0)
+            case "csharp":
+                if (code.Contains("static void Main(") || code.Contains("static async Task Main("))
+                    return "Program.cs";
+                var classMatch = System.Text.RegularExpressions.Regex.Match(code, @"(?:public|internal)\s+(?:static\s+)?class\s+(\w+)");
+                if (classMatch.Success) return $"{classMatch.Groups[1].Value}.cs";
+                var interfaceMatch = System.Text.RegularExpressions.Regex.Match(code, @"(?:public|internal)\s+interface\s+(\w+)");
+                if (interfaceMatch.Success) return $"{interfaceMatch.Groups[1].Value}.cs";
+                break;
+            case "go":
+                if (code.Contains("package main") && (code.Contains("func main()") || code.Contains("func main (")))
+                    return "main.go";
+                break;
+            case "react":
+                var reactDefaultMatch = System.Text.RegularExpressions.Regex.Match(code, @"export\s+default\s+function\s+(\w+)");
+                if (reactDefaultMatch.Success) return $"{reactDefaultMatch.Groups[1].Value}.tsx";
+                var reactCompMatch = System.Text.RegularExpressions.Regex.Match(code, @"(?:function|const)\s+(\w+)\s*[:(]\s*(?:.*?)\s*=>\s*\{", System.Text.RegularExpressions.RegexOptions.Singleline);
+                if (reactCompMatch.Success) return $"{reactCompMatch.Groups[1].Value}.tsx";
+                extension = ".tsx";
+                break;
+            case "python":
+                if (code.Contains("def main(") || code.Contains("if __name__"))
+                    return "main.py";
+                if (code.Contains("class "))
                 {
-                    var rest = code[(classIndex + 6)..];
-                    var endIndex = rest.IndexOfAny(new[] { '(', ':', ' ', '\n' });
-                    if (endIndex > 0)
+                    var classIndex = code.IndexOf("class ");
+                    if (classIndex >= 0)
                     {
-                        var className = rest[..endIndex].ToLower();
-                        return $"{className}.py";
+                        var rest = code[(classIndex + 6)..];
+                        var endIndex = rest.IndexOfAny(new[] { '(', ':', ' ', '\n' });
+                        if (endIndex > 0)
+                        {
+                            var className = rest[..endIndex].Trim().ToLowerInvariant();
+                            return $"{className}.py";
+                        }
                     }
                 }
-            }
+                break;
+            case "rust":
+                if (code.Contains("fn main()") || code.Contains("fn main ("))
+                    return "main.rs";
+                var modMatch = System.Text.RegularExpressions.Regex.Match(code, @"pub\s+fn\s+(\w+)\s*\(");
+                if (modMatch.Success) return $"{modMatch.Groups[1].Value}.rs";
+                break;
         }
 
-        // Default filename based on task number
         var existingCount = request.ProjectState?.Codebase.Count ?? 0;
         return $"Module{existingCount + 1}{extension}";
     }

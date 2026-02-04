@@ -1,3 +1,4 @@
+using AIDevelopmentEasy.Api.Models;
 using AIDevelopmentEasy.Core.Models;
 
 namespace AIDevelopmentEasy.Api.Services.Interfaces;
@@ -29,6 +30,16 @@ public interface IKnowledgeService
     Task CaptureFromCompletedPipelineAsync(
         string storyId,
         Dictionary<string, string> generatedFiles,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Capture agent usage insights from a completed pipeline (LLM calls per agent).
+    /// Feeds the knowledge-base insights folder.
+    /// </summary>
+    Task CaptureAgentInsightsFromPipelineAsync(
+        string storyId,
+        string storyTitle,
+        IReadOnlyList<LLMCallResult> llmCalls,
         CancellationToken cancellationToken = default);
 
     // ═══════════════════════════════════════════════════════════════════════════════

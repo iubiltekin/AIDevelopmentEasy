@@ -124,11 +124,20 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
                 var relativePath = GetRelativePath(rsFile, basePath);
 
                 foreach (Match m in StructRegex.Matches(fileContent))
-                    projectInfo.Classes.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath });
+                {
+                    var (startLine, endLine) = LineRangeHelper.GetBraceTypeLineRange(fileContent, m.Index);
+                    projectInfo.Classes.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath, StartLine = startLine, EndLine = endLine });
+                }
                 foreach (Match m in EnumRegex.Matches(fileContent))
-                    projectInfo.Classes.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath });
+                {
+                    var (startLine, endLine) = LineRangeHelper.GetBraceTypeLineRange(fileContent, m.Index);
+                    projectInfo.Classes.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath, StartLine = startLine, EndLine = endLine });
+                }
                 foreach (Match m in TraitRegex.Matches(fileContent))
-                    projectInfo.Interfaces.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath });
+                {
+                    var (startLine, endLine) = LineRangeHelper.GetBraceTypeLineRange(fileContent, m.Index);
+                    projectInfo.Interfaces.Add(new TypeInfo { Name = m.Groups[1].Value, Namespace = packageName, FilePath = relativePath, StartLine = startLine, EndLine = endLine });
+                }
             }
             catch (Exception ex)
             {

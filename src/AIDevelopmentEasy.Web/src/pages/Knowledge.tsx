@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Activity, CheckCircle, Bug, FileCode, Lightbulb, ChevronRight, Trash2, Search } from 'lucide-react';
 import { knowledgeApi } from '../services/api';
 import { PageLayout, StatCard, StatsGrid, ErrorAlert, LoadingSpinner, EmptyState } from '../components';
-import type { 
-  KnowledgeEntryDto, 
-  KnowledgeStatsDto 
+import type {
+  KnowledgeEntryDto,
+  KnowledgeStatsDto
 } from '../types';
-import { 
-  KnowledgeCategory, 
-  getKnowledgeCategoryLabel, 
+import {
+  KnowledgeCategory,
+  getKnowledgeCategoryLabel,
   getKnowledgeCategoryColor,
   getKnowledgeCategoryIcon
 } from '../types';
@@ -35,7 +35,7 @@ export default function Knowledge() {
     setError(null);
     try {
       const [entriesData, statsData, tagsData] = await Promise.all([
-        selectedCategory !== null 
+        selectedCategory !== null
           ? knowledgeApi.getAll(selectedCategory)
           : knowledgeApi.getAll(),
         knowledgeApi.getStats(),
@@ -76,7 +76,7 @@ export default function Knowledge() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this entry?')) return;
-    
+
     try {
       await knowledgeApi.delete(id);
       await loadData();
@@ -96,8 +96,8 @@ export default function Knowledge() {
   };
 
   const toggleTag = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
+    setSelectedTags(prev =>
+      prev.includes(tag)
         ? prev.filter(t => t !== tag)
         : [...prev, tag]
     );
@@ -123,21 +123,33 @@ export default function Knowledge() {
       loading={loading}
       onRefresh={loadData}
       actions={[
-        { 
-          label: 'Search', 
-          onClick: () => setShowSearch(!showSearch), 
-          icon: Search, 
-          variant: 'secondary' 
+        {
+          label: 'Search',
+          onClick: () => setShowSearch(!showSearch),
+          icon: Search,
+          variant: 'secondary'
         },
-        { 
-          label: 'Add Pattern', 
-          onClick: () => navigate('/knowledge/new/pattern'), 
-          icon: Plus 
+        {
+          label: 'Add Pattern',
+          onClick: () => navigate('/knowledge/new/pattern'),
+          icon: Plus
         },
-        { 
-          label: 'Add Error Fix', 
-          onClick: () => navigate('/knowledge/new/error'), 
+        {
+          label: 'Add Error Fix',
+          onClick: () => navigate('/knowledge/new/error'),
           icon: Bug,
+          variant: 'secondary'
+        },
+        {
+          label: 'Add Template',
+          onClick: () => navigate('/knowledge/new/template'),
+          icon: FileCode,
+          variant: 'secondary'
+        },
+        {
+          label: 'Add Agent Insight',
+          onClick: () => navigate('/knowledge/new/insight'),
+          icon: Lightbulb,
           variant: 'secondary'
         }
       ]}
@@ -182,11 +194,10 @@ export default function Knowledge() {
             <div className="flex gap-2">
               <button
                 onClick={() => setSelectedCategory(null)}
-                className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                  selectedCategory === null 
-                    ? 'bg-blue-600 text-white' 
+                className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${selectedCategory === null
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                }`}
+                  }`}
               >
                 All
               </button>
@@ -196,11 +207,10 @@ export default function Knowledge() {
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat as KnowledgeCategory)}
-                    className={`px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-1 ${
-                      selectedCategory === cat 
-                        ? 'bg-blue-600 text-white' 
+                    className={`px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-1 ${selectedCategory === cat
+                        ? 'bg-blue-600 text-white'
                         : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                    }`}
+                      }`}
                   >
                     <span>{getKnowledgeCategoryIcon(cat as KnowledgeCategory)}</span>
                     {getKnowledgeCategoryLabel(cat as KnowledgeCategory)}
@@ -235,11 +245,10 @@ export default function Knowledge() {
                 <button
                   key={tag}
                   onClick={() => toggleTag(tag)}
-                  className={`px-2 py-0.5 rounded text-xs transition-colors ${
-                    selectedTags.includes(tag)
+                  className={`px-2 py-0.5 rounded text-xs transition-colors ${selectedTags.includes(tag)
                       ? 'bg-blue-600 text-white'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  }`}
+                    }`}
                 >
                   {tag}
                 </button>
@@ -259,7 +268,7 @@ export default function Knowledge() {
       {!loading && (
         <>
           {filteredEntries.length === 0 ? (
-            <EmptyState 
+            <EmptyState
               message="No knowledge entries found. Start by adding patterns or error fixes."
               actionLabel="Add Pattern"
               onAction={() => navigate('/knowledge/new/pattern')}

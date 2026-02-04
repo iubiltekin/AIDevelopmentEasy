@@ -25,11 +25,14 @@ import type {
   SuccessfulPatternDto,
   CommonErrorDto,
   ProjectTemplateDto,
+  AgentInsightDto,
   KnowledgeStatsDto,
   PatternSearchResultDto,
   ErrorMatchResultDto,
   CreatePatternRequest,
   CreateErrorRequest,
+  CreateTemplateRequest,
+  CreateInsightRequest,
   SearchKnowledgeRequest,
   KnowledgeCategory,
   PatternSubcategory,
@@ -497,6 +500,24 @@ export const knowledgeApi = {
   getTemplate: async (id: string): Promise<ProjectTemplateDto> => {
     const response = await fetch(`${API_BASE}/knowledge/templates/${id}`);
     return handleResponse<ProjectTemplateDto>(response);
+  },
+
+  createTemplate: async (request: CreateTemplateRequest): Promise<ProjectTemplateDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<ProjectTemplateDto>(response);
+  },
+
+  createInsight: async (request: CreateInsightRequest): Promise<AgentInsightDto> => {
+    const response = await fetch(`${API_BASE}/knowledge/insights`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return handleResponse<AgentInsightDto>(response);
   },
 
   // Search

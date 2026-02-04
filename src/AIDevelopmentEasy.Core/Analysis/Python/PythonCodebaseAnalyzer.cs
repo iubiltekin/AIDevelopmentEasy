@@ -170,14 +170,23 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
                 if (moduleName != "__init__" && !projectInfo.Namespaces.Contains(moduleName))
                     projectInfo.Namespaces.Add(moduleName);
 
-                foreach (Match m in ClassRegex.Matches(fileContent))
+                var classMatches = ClassRegex.Matches(fileContent).Cast<Match>().ToList();
+                for (int i = 0; i < classMatches.Count; i++)
                 {
+                    var m = classMatches[i];
                     var baseTypes = m.Groups[2].Success ? m.Groups[2].Value.Split(',').Select(t => t.Trim()).ToList() : new List<string>();
+                    int startLine = LineRangeHelper.LineFromIndex(fileContent, m.Index);
+                    int endLine = i + 1 < classMatches.Count
+                        ? LineRangeHelper.LineFromIndex(fileContent, classMatches[i + 1].Index) - 1
+                        : fileContent.Split('\n').Length;
+                    if (endLine < startLine) endLine = startLine;
                     projectInfo.Classes.Add(new TypeInfo
                     {
                         Name = m.Groups[1].Value,
                         Namespace = moduleName,
                         FilePath = relativePath,
+                        StartLine = startLine,
+                        EndLine = endLine,
                         BaseTypes = baseTypes,
                         DetectedPattern = InferPythonPattern(m.Groups[1].Value, fileContent)
                     });

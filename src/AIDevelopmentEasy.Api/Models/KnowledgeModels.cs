@@ -68,6 +68,18 @@ public class ProjectTemplateDto : KnowledgeEntryDto
 }
 
 /// <summary>
+/// Agent insight DTO
+/// </summary>
+public class AgentInsightDto : KnowledgeEntryDto
+{
+    public string AgentName { get; set; } = string.Empty;
+    public string? PromptInsight { get; set; }
+    public float? OptimalTemperature { get; set; }
+    public string Scenario { get; set; } = string.Empty;
+    public string? ImprovementDescription { get; set; }
+}
+
+/// <summary>
 /// Template file DTO
 /// </summary>
 public class TemplateFileDto
@@ -186,6 +198,38 @@ public class CreateErrorRequest
 }
 
 /// <summary>
+/// Request to create a project template
+/// </summary>
+public class CreateTemplateRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public List<string> Tags { get; set; } = new();
+    public string Language { get; set; } = "csharp";
+    public string TemplateType { get; set; } = string.Empty;
+    public string TargetFramework { get; set; } = string.Empty;
+    public List<TemplateFileDto> TemplateFiles { get; set; } = new();
+    public List<PackageInfoDto> Packages { get; set; } = new();
+    public string? SetupInstructions { get; set; }
+}
+
+/// <summary>
+/// Request to create an agent insight
+/// </summary>
+public class CreateInsightRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public List<string> Tags { get; set; } = new();
+    public string Language { get; set; } = "csharp";
+    public string AgentName { get; set; } = string.Empty;
+    public string? PromptInsight { get; set; }
+    public float? OptimalTemperature { get; set; }
+    public string Scenario { get; set; } = string.Empty;
+    public string? ImprovementDescription { get; set; }
+}
+
+/// <summary>
 /// Request to search knowledge base
 /// </summary>
 public class SearchKnowledgeRequest
@@ -277,6 +321,7 @@ public static class KnowledgeMappingExtensions
             SuccessfulPattern pattern => pattern.ToDto(),
             CommonError error => error.ToDto(),
             ProjectTemplate template => template.ToDto(),
+            AgentInsight insight => insight.ToDto(),
             _ => new KnowledgeEntryDto
             {
                 Id = entry.Id,
@@ -383,6 +428,31 @@ public static class KnowledgeMappingExtensions
                 IsRequired = p.IsRequired
             }).ToList(),
             SetupInstructions = template.SetupInstructions
+        };
+    }
+
+    public static AgentInsightDto ToDto(this AgentInsight insight)
+    {
+        return new AgentInsightDto
+        {
+            Id = insight.Id,
+            Category = KnowledgeCategoryDto.AgentInsight,
+            Title = insight.Title,
+            Description = insight.Description,
+            Tags = insight.Tags,
+            Language = insight.Language,
+            CreatedAt = insight.CreatedAt,
+            LastUsedAt = insight.LastUsedAt,
+            UsageCount = insight.UsageCount,
+            SuccessRate = insight.SuccessRate,
+            IsVerified = insight.IsVerified,
+            IsManual = insight.IsManual,
+            SourceStoryId = insight.SourceStoryId,
+            AgentName = insight.AgentName,
+            PromptInsight = insight.PromptInsight,
+            OptimalTemperature = insight.OptimalTemperature,
+            Scenario = insight.Scenario,
+            ImprovementDescription = insight.ImprovementDescription
         };
     }
 
