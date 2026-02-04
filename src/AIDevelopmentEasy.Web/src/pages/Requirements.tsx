@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, RefreshCw, Activity, CheckCircle, Clock, FileText, Trash2, ChevronRight, Sparkles, GitBranch } from 'lucide-react';
+import { Plus, RefreshCw, Activity, CheckCircle, Clock, FileText, Trash2, ChevronRight, Sparkles, GitBranch, ClipboardList } from 'lucide-react';
 import { requirementsApi, codebasesApi } from '../services/api';
-import type { 
-  RequirementDto, 
+import type {
+  RequirementDto,
   CodebaseDto,
-  RequirementType 
+  RequirementType
 } from '../types';
-import { 
-  getRequirementTypeLabel, 
+import {
+  getRequirementTypeLabel,
   getRequirementTypeColor,
   getRequirementStatusLabel,
   getRequirementStatusColor,
@@ -22,7 +22,7 @@ export default function Requirements() {
   const [codebases, setCodebases] = useState<CodebaseDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // New requirement form state
   const [showForm, setShowForm] = useState(false);
   const [formTitle, setFormTitle] = useState('');
@@ -64,7 +64,7 @@ export default function Requirements() {
         type: formType,
         codebaseId: formCodebaseId || undefined
       });
-      
+
       // Navigate to the new requirement
       navigate(`/requirements/${req.id}`);
     } catch (err) {
@@ -77,7 +77,7 @@ export default function Requirements() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this requirement?')) return;
-    
+
     try {
       await requirementsApi.delete(id);
       // Reload data to ensure UI is in sync
@@ -100,7 +100,10 @@ export default function Requirements() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Requirements</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+            <ClipboardList className="w-8 h-8 text-slate-400" />
+            Requirements
+          </h1>
           <p className="text-slate-400">Create and manage requirements through the wizard</p>
         </div>
         <div className="flex gap-3">
@@ -134,7 +137,7 @@ export default function Requirements() {
             </div>
           </div>
         </div>
-        
+
         <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-5">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-emerald-500/20 rounded-lg">
@@ -212,11 +215,10 @@ export default function Requirements() {
                     key={type}
                     type="button"
                     onClick={() => setFormType(type as RequirementType)}
-                    className={`px-4 py-2 rounded-lg border transition-colors ${
-                      formType === type
+                    className={`px-4 py-2 rounded-lg border transition-colors ${formType === type
                         ? 'bg-blue-600 border-blue-500 text-white'
                         : 'bg-slate-900 border-slate-600 text-slate-300 hover:border-slate-500'
-                    }`}
+                      }`}
                   >
                     <span className={`inline-block w-2 h-2 rounded-full mr-2 ${getRequirementTypeColor(type as RequirementType)}`}></span>
                     {getRequirementTypeLabel(type as RequirementType)}
@@ -331,13 +333,13 @@ export default function Requirements() {
 }
 
 // Requirement Card Component
-function RequirementCard({ 
-  requirement, 
-  onDelete, 
+function RequirementCard({
+  requirement,
+  onDelete,
   onClick,
   style
-}: { 
-  requirement: RequirementDto; 
+}: {
+  requirement: RequirementDto;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onClick: () => void;
   style?: React.CSSProperties;
@@ -379,7 +381,7 @@ function RequirementCard({
             <p className="text-sm text-slate-400 line-clamp-2 mt-1">
               {requirement.rawContent}
             </p>
-            
+
             <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
               <span className="font-mono">{requirement.id}</span>
               <span>{new Date(requirement.createdAt).toLocaleDateString()}</span>
@@ -398,7 +400,7 @@ function RequirementCard({
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           <button
             onClick={(e) => onDelete(requirement.id, e)}

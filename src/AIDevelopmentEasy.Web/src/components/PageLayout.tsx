@@ -11,26 +11,33 @@ interface PageAction {
 interface PageLayoutProps {
   title: string;
   description: string;
+  /** Icon shown before the page title */
+  titleIcon?: LucideIcon;
   loading?: boolean;
   onRefresh?: () => void;
   actions?: PageAction[];
   children: ReactNode;
 }
 
-export function PageLayout({ 
-  title, 
-  description, 
-  loading = false, 
-  onRefresh, 
+export function PageLayout({
+  title,
+  description,
+  titleIcon,
+  loading = false,
+  onRefresh,
   actions = [],
-  children 
+  children
 }: PageLayoutProps) {
+  const TitleIcon = titleIcon;
   return (
     <div className="p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">{title}</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+            {TitleIcon && <TitleIcon className="w-8 h-8 text-slate-400" />}
+            {title}
+          </h1>
           <p className="text-slate-400">{description}</p>
         </div>
         <div className="flex gap-3">
@@ -50,11 +57,10 @@ export function PageLayout({
               <button
                 key={index}
                 onClick={action.onClick}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                  isPrimary 
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${isPrimary
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-slate-700 hover:bg-slate-600 text-white'
-                }`}
+                  }`}
               >
                 {Icon && <Icon className="w-4 h-4" />}
                 {action.label}
@@ -63,7 +69,7 @@ export function PageLayout({
           })}
         </div>
       </div>
-      
+
       {children}
     </div>
   );

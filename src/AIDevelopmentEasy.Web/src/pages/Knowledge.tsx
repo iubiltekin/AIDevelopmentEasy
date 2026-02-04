@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Activity, CheckCircle, Bug, FileCode, Lightbulb, ChevronRight, Trash2, Search } from 'lucide-react';
+import { Plus, Activity, CheckCircle, Bug, FileCode, Lightbulb, ChevronRight, Trash2, Search, BookOpen } from 'lucide-react';
 import { knowledgeApi } from '../services/api';
 import { PageLayout, StatCard, StatsGrid, ErrorAlert, LoadingSpinner, EmptyState } from '../components';
 import type {
@@ -120,6 +120,7 @@ export default function Knowledge() {
     <PageLayout
       title="Knowledge Base"
       description="Captured patterns, error fixes, and templates from successful pipelines"
+      titleIcon={BookOpen}
       loading={loading}
       onRefresh={loadData}
       actions={[
@@ -195,8 +196,8 @@ export default function Knowledge() {
               <button
                 onClick={() => setSelectedCategory(null)}
                 className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${selectedCategory === null
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
               >
                 All
@@ -208,8 +209,8 @@ export default function Knowledge() {
                     key={cat}
                     onClick={() => setSelectedCategory(cat as KnowledgeCategory)}
                     className={`px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-1 ${selectedCategory === cat
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                       }`}
                   >
                     <span>{getKnowledgeCategoryIcon(cat as KnowledgeCategory)}</span>
@@ -246,8 +247,8 @@ export default function Knowledge() {
                   key={tag}
                   onClick={() => toggleTag(tag)}
                   className={`px-2 py-0.5 rounded text-xs transition-colors ${selectedTags.includes(tag)
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
                 >
                   {tag}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, Trash2, CheckCircle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trash2, CheckCircle, BookOpen } from 'lucide-react';
 import { knowledgeApi } from '../services/api';
 import type {
   KnowledgeEntryDto,
@@ -114,6 +114,7 @@ export default function KnowledgeDetail() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
+              <BookOpen className="w-7 h-7 text-slate-400 flex-shrink-0" />
               <h1 className="text-2xl font-bold text-white">{entry.title}</h1>
               <span className={`px-2 py-0.5 rounded text-sm text-white ${getKnowledgeCategoryColor(entry.category)}`}>
                 {getKnowledgeCategoryIcon(entry.category)} {getKnowledgeCategoryLabel(entry.category)}

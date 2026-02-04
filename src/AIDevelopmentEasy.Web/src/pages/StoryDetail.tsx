@@ -386,6 +386,7 @@ export function StoryDetail() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
+              <FileCode className="w-7 h-7 text-slate-400 flex-shrink-0" />
               <h1 className="text-2xl font-bold text-white">{story.name}</h1>
               <StatusBadge status={story.status} />
             </div>

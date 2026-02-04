@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { FileCode, Settings, Wifi, WifiOff, Database, ClipboardList, BookOpen } from 'lucide-react';
+import { FileCode, Settings, Wifi, WifiOff, Database, ClipboardList, BookOpen, ScrollText } from 'lucide-react';
 import { useSignalR } from '../hooks/useSignalR';
 
 export function Layout() {
@@ -14,6 +14,7 @@ export function Layout() {
 
   const utilityNavItems = [
     { path: '/codebases', label: 'Codebases', icon: Database },
+    { path: '/prompts', label: 'Prompts', icon: ScrollText },
     { path: '/settings', label: 'Settings', icon: Settings },
   ];
 

@@ -36,7 +36,9 @@ import type {
   SearchKnowledgeRequest,
   KnowledgeCategory,
   PatternSubcategory,
-  ErrorType
+  ErrorType,
+  PromptsByCategory,
+  PromptContentDto
 } from '../types';
 
 const API_BASE = '/api';
@@ -567,5 +569,76 @@ export const knowledgeApi = {
   getStats: async (): Promise<KnowledgeStatsDto> => {
     const response = await fetch(`${API_BASE}/knowledge/stats`);
     return handleResponse<KnowledgeStatsDto>(response);
+  }
+};
+
+// Prompts API (list, get, update – no add/delete)
+export const promptsApi = {
+  list: async (): Promise<PromptsByCategory> => {
+    const response = await fetch(`${API_BASE}/prompts`);
+    return handleResponse<PromptsByCategory>(response);
+  },
+
+  get: async (category: string, name: string): Promise<PromptContentDto> => {
+    const response = await fetch(`${API_BASE}/prompts/${encodeURIComponent(category)}/${encodeURIComponent(name)}`);
+    return handleResponse<PromptContentDto>(response);
+  },
+
+  update: async (category: string, name: string, content: string): Promise<void> => {
+    const response = await fetch(
+      `${API_BASE}/prompts/${encodeURIComponent(category)}/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+      }
+    );
+    await handleResponse<void>(response);
+  }
+};
+
+// Settings API (LLM settings and stats – uses same origin /api)
+export interface LLMSettingsDto {
+  maxPromptTokens: number;
+  maxCompletionTokens: number;
+  showPromptInfo: boolean;
+  estimatedCostPer1KInputTokens: number;
+  estimatedCostPer1KOutputTokens: number;
+}
+
+export interface LLMUsageStatsDto {
+  totalCalls: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalTokens: number;
+  totalCostUSD: number;
+  sessionStart: string;
+  sessionDuration: string;
+}
+
+export const settingsApi = {
+  getLlm: async (): Promise<LLMSettingsDto> => {
+    const response = await fetch(`${API_BASE}/settings/llm`);
+    return handleResponse<LLMSettingsDto>(response);
+  },
+
+  updateLlm: async (settings: LLMSettingsDto): Promise<LLMSettingsDto> => {
+    const response = await fetch(`${API_BASE}/settings/llm`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    return handleResponse<LLMSettingsDto>(response);
+  },
+
+  getLlmStats: async (): Promise<LLMUsageStatsDto | null> => {
+    const response = await fetch(`${API_BASE}/settings/llm/stats`);
+    if (!response.ok) return null;
+    return handleResponse<LLMUsageStatsDto>(response);
+  },
+
+  resetLlmStats: async (): Promise<void> => {
+    const response = await fetch(`${API_BASE}/settings/llm/stats/reset`, { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to reset stats');
   }
 };

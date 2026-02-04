@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, RefreshCw, Activity, CheckCircle, Clock, AlertTriangle, ChevronRight, Database } from 'lucide-react';
+import { Plus, RefreshCw, Activity, CheckCircle, Clock, AlertTriangle, ChevronRight, Database, FileCode } from 'lucide-react';
 import { StoryDto, StoryStatus, CodebaseDto } from '../types';
 import { storiesApi, pipelineApi, codebasesApi } from '../services/api';
 import { StoryCard } from '../components/StoryCard';
@@ -116,7 +116,10 @@ export function Stories() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Stories</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+            <FileCode className="w-8 h-8 text-slate-400" />
+            Stories
+          </h1>
           <p className="text-slate-400">Manage your development stories and run the AI pipeline</p>
         </div>
         <div className="flex gap-3">

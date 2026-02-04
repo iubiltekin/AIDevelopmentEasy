@@ -130,7 +130,7 @@ export function CodebaseDetail() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="flex items-center gap-3">
-          <FolderCode className="w-8 h-8 text-blue-400" />
+          <FolderCode className="w-8 h-8 text-slate-400 flex-shrink-0" />
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-white">{codebase.name}</h1>

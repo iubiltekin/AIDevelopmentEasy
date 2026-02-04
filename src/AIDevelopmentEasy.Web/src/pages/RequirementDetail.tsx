@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, XCircle, Play, Edit2, Save, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, XCircle, Play, Edit2, Save, X, ClipboardList } from 'lucide-react';
 import { requirementsApi, codebasesApi } from '../services/api';
-import type { 
-  RequirementDetailDto, 
+import type {
+  RequirementDetailDto,
   WizardStatusDto,
   AnswerDto,
   CodebaseDto,
   RequirementType
 } from '../types';
-import { 
+import {
   RequirementStatus,
   getRequirementTypeLabel,
   getRequirementTypeColor,
@@ -21,13 +21,13 @@ import { WizardStatus } from '../components/WizardStatus';
 export default function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  
+
   const [requirement, setRequirement] = useState<RequirementDetailDto | null>(null);
   const [wizardStatus, setWizardStatus] = useState<WizardStatusDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -36,20 +36,20 @@ export default function RequirementDetail() {
   const [editCodebaseId, setEditCodebaseId] = useState<string>('');
   const [codebases, setCodebases] = useState<CodebaseDto[]>([]);
   const [saving, setSaving] = useState(false);
-  
+
   // Answers state
   const [answers, setAnswers] = useState<Record<string, AnswerDto>>({});
   const [aiNotes, setAiNotes] = useState('');
-  
+
   // Story selection state
   const [selectedStories, setSelectedStories] = useState<Set<string>>(new Set());
-  
+
   // Track if stories have been initialized (to prevent auto-refresh from resetting selection)
   const storiesInitializedRef = useRef(false);
 
   const loadData = useCallback(async () => {
     if (!id) return;
-    
+
     try {
       const [req, status] = await Promise.all([
         requirementsApi.getById(id),
@@ -57,13 +57,13 @@ export default function RequirementDetail() {
       ]);
       setRequirement(req);
       setWizardStatus(status);
-      
+
       // Initialize edit fields
       setEditTitle(req.title);
       setEditContent(req.rawContent);
       setEditType(req.type);
       setEditCodebaseId(req.codebaseId || '');
-      
+
       // Initialize answers from saved data (only if not already set)
       if (req.answers?.answers && Object.keys(answers).length === 0) {
         const answerMap: Record<string, AnswerDto> = {};
@@ -72,19 +72,19 @@ export default function RequirementDetail() {
         });
         setAnswers(answerMap);
       }
-      
+
       // Initialize AI notes (only if not already set)
       if (req.aiNotes && !aiNotes) {
         setAiNotes(req.aiNotes);
       }
-      
+
       // Initialize story selection ONLY on first load (all selected by default)
       // Don't reset on auto-refresh to preserve user's selection
       if (req.generatedStories?.length > 0 && !storiesInitializedRef.current) {
         setSelectedStories(new Set(req.generatedStories.map(s => s.id)));
         storiesInitializedRef.current = true;
       }
-      
+
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load requirement');
@@ -132,7 +132,7 @@ export default function RequirementDetail() {
 
   const handleSaveEdit = async () => {
     if (!id || !editContent.trim()) return;
-    
+
     try {
       setSaving(true);
       await requirementsApi.update(id, {
@@ -289,13 +289,14 @@ export default function RequirementDetail() {
                 {getRequirementStatusLabel(requirement.status)}
               </span>
             </div>
-            <h1 className="text-2xl font-bold text-white">
+            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+              <ClipboardList className="w-7 h-7 text-slate-400 flex-shrink-0" />
               {requirement.title}
             </h1>
             <p className="text-slate-400 text-sm">{requirement.id}</p>
           </div>
         </div>
-        
+
         {/* Action Buttons */}
         <div className="flex gap-3">
           <button
@@ -305,7 +306,7 @@ export default function RequirementDetail() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          
+
           {canEdit && !isEditing && (
             <button
               onClick={handleStartEdit}
@@ -315,7 +316,7 @@ export default function RequirementDetail() {
               Edit
             </button>
           )}
-          
+
           {requirement.status === RequirementStatus.Draft && !isEditing && (
             <button
               onClick={handleStartWizard}
@@ -330,7 +331,7 @@ export default function RequirementDetail() {
               Start Wizard
             </button>
           )}
-          
+
           {isWizardRunning && (
             <button
               onClick={handleCancel}
@@ -381,7 +382,7 @@ export default function RequirementDetail() {
               </button>
             </div>
           </div>
-          
+
           <div className="space-y-4">
             {/* Title */}
             <div>
@@ -396,7 +397,7 @@ export default function RequirementDetail() {
                 className="w-full px-4 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            
+
             {/* Type Selection */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -408,11 +409,10 @@ export default function RequirementDetail() {
                     key={type}
                     type="button"
                     onClick={() => setEditType(type as RequirementType)}
-                    className={`px-4 py-2 rounded-lg border transition-colors ${
-                      editType === type
+                    className={`px-4 py-2 rounded-lg border transition-colors ${editType === type
                         ? 'bg-blue-600 border-blue-500 text-white'
                         : 'bg-slate-900 border-slate-600 text-slate-300 hover:border-slate-500'
-                    }`}
+                      }`}
                   >
                     <span className={`inline-block w-2 h-2 rounded-full mr-2 ${getRequirementTypeColor(type as RequirementType)}`}></span>
                     {getRequirementTypeLabel(type as RequirementType)}
@@ -420,7 +420,7 @@ export default function RequirementDetail() {
                 ))}
               </div>
             </div>
-            
+
             {/* Codebase Selection */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
@@ -439,7 +439,7 @@ export default function RequirementDetail() {
                 ))}
               </select>
             </div>
-            
+
             {/* Raw Content */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
@@ -494,15 +494,15 @@ export default function RequirementDetail() {
       )}
 
       {/* Final Requirement Document - Show when available and not in earlier phases */}
-      {requirement.finalContent && wizardStatus && 
-       wizardStatus.currentPhase > 3 && !isEditing && (
-        <div className="mt-6 bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-3">Final Requirement Document</h2>
-          <pre className="text-slate-300 whitespace-pre-wrap font-mono text-sm bg-slate-900/50 p-4 rounded-lg border border-slate-700 max-h-80 overflow-y-auto">
-            {requirement.finalContent}
-          </pre>
-        </div>
-      )}
+      {requirement.finalContent && wizardStatus &&
+        wizardStatus.currentPhase > 3 && !isEditing && (
+          <div className="mt-6 bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-white mb-3">Final Requirement Document</h2>
+            <pre className="text-slate-300 whitespace-pre-wrap font-mono text-sm bg-slate-900/50 p-4 rounded-lg border border-slate-700 max-h-80 overflow-y-auto">
+              {requirement.finalContent}
+            </pre>
+          </div>
+        )}
 
       {/* Completed Actions */}
       {requirement.status === RequirementStatus.Completed && !isEditing && (

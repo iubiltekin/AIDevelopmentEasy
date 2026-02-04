@@ -11,6 +11,8 @@ import RequirementDetail from './pages/RequirementDetail';
 import Knowledge from './pages/Knowledge';
 import KnowledgeDetail from './pages/KnowledgeDetail';
 import KnowledgeCreate from './pages/KnowledgeCreate';
+import Prompts from './pages/Prompts';
+import PromptDetail from './pages/PromptDetail';
 
 function App() {
   return (
@@ -27,6 +29,8 @@ function App() {
           <Route path="knowledge" element={<Knowledge />} />
           <Route path="knowledge/new/:type" element={<KnowledgeCreate />} />
           <Route path="knowledge/:id" element={<KnowledgeDetail />} />
+          <Route path="prompts" element={<Prompts />} />
+          <Route path="prompts/:category/:name" element={<PromptDetail />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

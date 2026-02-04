@@ -1048,3 +1048,12 @@ export function getErrorTypeColor(errorType: ErrorType): string {
   };
   return colors[errorType] || 'bg-slate-500';
 }
+
+// Prompts (agent prompt files – list/view/edit only)
+export type PromptsByCategory = Record<string, string[]>;
+
+export interface PromptContentDto {
+  category: string;
+  name: string;
+  content: string;
+}

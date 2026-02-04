@@ -105,7 +105,7 @@ export function Codebases() {
     <div className="p-8">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
-          <Database className="w-8 h-8 text-blue-400" />
+          <Database className="w-8 h-8 text-slate-400" />
           <h1 className="text-3xl font-bold text-white">Codebases</h1>
         </div>
         <div className="flex gap-3">

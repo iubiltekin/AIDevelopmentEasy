@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { BookOpen } from 'lucide-react';
 import { knowledgeApi } from '../services/api';
 import {
   PatternSubcategory,
@@ -150,7 +151,8 @@ export default function KnowledgeCreate() {
         >
           ← Back to Knowledge Base
         </button>
-        <h1 className="text-2xl font-bold text-white">
+        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+          <BookOpen className="w-7 h-7 text-slate-400 flex-shrink-0" />
           {isPattern && 'Add New Pattern'}
           {isError && 'Add New Error Fix'}
           {isTemplate && 'Add New Template'}

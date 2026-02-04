@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, XCircle } from 'lucide-react';
-import { 
-  PipelineStatusDto, 
-  PipelinePhase, 
+import { ArrowLeft, RefreshCw, XCircle, Activity } from 'lucide-react';
+import {
+  PipelineStatusDto,
+  PipelinePhase,
   PipelineUpdateMessage,
   RetryAction
 } from '../types';
@@ -20,12 +20,12 @@ export function PipelineView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<PipelineUpdateMessage[]>([]);
-  
+
   const { lastUpdate, subscribeToStory, unsubscribeFromStory } = useSignalR();
 
   const loadStatus = useCallback(async () => {
     if (!id) return;
-    
+
     try {
       const [pipelineStatus, req] = await Promise.all([
         pipelineApi.getStatus(id),
@@ -43,7 +43,7 @@ export function PipelineView() {
 
   useEffect(() => {
     loadStatus();
-    
+
     if (id) {
       subscribeToStory(id);
       return () => {
@@ -83,7 +83,7 @@ export function PipelineView() {
   const handleCancel = async () => {
     if (!id) return;
     if (!confirm('Are you sure you want to cancel this pipeline?')) return;
-    
+
     try {
       await pipelineApi.cancel(id);
       navigate('/');
@@ -94,7 +94,7 @@ export function PipelineView() {
 
   const handleApproveRetry = async (action: RetryAction) => {
     if (!id) return;
-    
+
     const actionLabels: Record<RetryAction, string> = {
       [RetryAction.AutoFix]: 'Auto-fix and retry',
       [RetryAction.ManualFix]: 'Request manual fix',
@@ -109,7 +109,7 @@ export function PipelineView() {
     try {
       await pipelineApi.approveRetry(id, action);
       await loadStatus();
-      
+
       // Add log entry
       setLogs(prev => [...prev, {
         storyId: id,
@@ -143,7 +143,8 @@ export function PipelineView() {
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-white">
+            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+              <Activity className="w-7 h-7 text-slate-400 flex-shrink-0" />
               {story?.name || id}
             </h1>
             <p className="text-slate-400">Pipeline Progress</p>

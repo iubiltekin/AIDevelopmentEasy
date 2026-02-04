@@ -9,3 +9,5 @@ export { default as RequirementDetail } from './RequirementDetail';
 export { default as Knowledge } from './Knowledge';
 export { default as KnowledgeDetail } from './KnowledgeDetail';
 export { default as KnowledgeCreate } from './KnowledgeCreate';
+export { default as Prompts } from './Prompts';
+export { default as PromptDetail } from './PromptDetail';
