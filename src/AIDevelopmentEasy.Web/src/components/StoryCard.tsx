@@ -5,12 +5,14 @@ import { StatusBadge } from './StatusBadge';
 
 interface StoryCardProps {
   story: StoryDto;
+  codebaseName?: string | null;
+  codebasePath?: string | null;
   onStart: (id: string) => void;
   onReset: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps) {
+export function StoryCard({ story, codebaseName, codebasePath, onStart, onReset, onDelete }: StoryCardProps) {
   const isCompleted = story.status === StoryStatus.Completed;
   const isRunning = story.status === StoryStatus.InProgress;
   const canStart = !isRunning && story.status !== StoryStatus.Completed;
@@ -23,7 +25,7 @@ export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps)
             <FileText className="w-5 h-5 text-blue-400" />
           </div>
           <div>
-            <Link 
+            <Link
               to={`/stories/${story.id}`}
               className="text-lg font-semibold text-white hover:text-blue-400 transition-colors"
             >
@@ -32,13 +34,18 @@ export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps)
             <div className="flex items-center gap-3 mt-0.5">
               <span className="text-xs text-slate-500 font-mono">{story.id}</span>
               {story.codebaseId && (
-                <div className="flex items-center gap-1 text-xs text-emerald-400">
-                  <Database className="w-3 h-3" />
-                  With codebase
+                <div className="flex flex-col gap-0.5 text-xs text-emerald-400" title={codebasePath || undefined}>
+                  <div className="flex items-center gap-1">
+                    <Database className="w-3 h-3 flex-shrink-0" />
+                    <span className="font-medium truncate max-w-[200px]">{codebaseName || story.codebaseId}</span>
+                  </div>
+                  {codebasePath && (
+                    <span className="text-slate-500 font-mono truncate max-w-[240px] block pl-4">{codebasePath}</span>
+                  )}
                 </div>
               )}
               {story.requirementId && (
-                <Link 
+                <Link
                   to={`/requirements/${story.requirementId}`}
                   className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors"
                   title="View source requirement"
@@ -69,7 +76,7 @@ export function StoryCard({ story, onStart, onReset, onDelete }: StoryCardProps)
             Start
           </button>
         )}
-        
+
         {isRunning && (
           <Link
             to={`/pipeline/${story.id}`}

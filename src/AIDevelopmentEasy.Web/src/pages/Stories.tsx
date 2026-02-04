@@ -13,7 +13,7 @@ export function Stories() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { storyListChanged } = useSignalR();
-  
+
   // New story form state
   const [showForm, setShowForm] = useState(false);
   const [formName, setFormName] = useState('');
@@ -49,18 +49,18 @@ export function Stories() {
     try {
       setCreating(true);
       const story = await storiesApi.create({
-        name: formName || formContent.split('\n')[0].slice(0, 50),
+        name: formName.trim(),
         content: formContent,
         type: 0, // Single
         codebaseId: formCodebaseId || undefined
       });
-      
+
       // Reset form
       setFormName('');
       setFormContent('');
       setFormCodebaseId('');
       setShowForm(false);
-      
+
       // Navigate to the new story
       navigate(`/stories/${story.id}`);
     } catch (err) {
@@ -150,7 +150,7 @@ export function Stories() {
             </div>
           </div>
         </div>
-        
+
         <div className="bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-5">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-emerald-500/20 rounded-lg">
@@ -203,7 +203,7 @@ export function Stories() {
         <div className="mb-8 bg-slate-800/50 backdrop-blur border border-slate-700 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Create New Story</h2>
           <form onSubmit={handleCreate} className="space-y-4">
-            {/* Name (optional) */}
+            {/* Name (optional – LLM-generated from content if left empty) */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">
                 Story Name (optional)
@@ -212,9 +212,12 @@ export function Stories() {
                 type="text"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                placeholder="Auto-generated from content if empty"
+                placeholder="Leave empty to generate a title from your content using AI"
                 className="w-full px-4 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
+              <p className="text-xs text-slate-500 mt-1">
+                A short, clear name is generated from the story content if you leave this blank.
+              </p>
             </div>
 
             {/* Codebase Selection */}
@@ -313,16 +316,21 @@ export function Stories() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4">
-          {stories.map((story, index) => (
-            <div key={story.id} style={{ animationDelay: `${index * 100}ms` }}>
-              <StoryCard
-                story={story}
-                onStart={handleStart}
-                onReset={handleReset}
-                onDelete={handleDelete}
-              />
-            </div>
-          ))}
+          {stories.map((story, index) => {
+            const codebase = story.codebaseId ? codebases.find(c => c.id === story.codebaseId) : undefined;
+            return (
+              <div key={story.id} style={{ animationDelay: `${index * 100}ms` }}>
+                <StoryCard
+                  story={story}
+                  codebaseName={codebase?.name}
+                  codebasePath={codebase?.path}
+                  onStart={handleStart}
+                  onReset={handleReset}
+                  onDelete={handleDelete}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

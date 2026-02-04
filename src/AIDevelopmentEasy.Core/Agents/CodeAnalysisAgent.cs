@@ -26,8 +26,8 @@ public class CodeAnalysisAgent
     }
 
     /// <summary>
-    /// Analyze a codebase at the given path. Runs all analyzers that CanAnalyze (C#, Go, Rust, etc.)
-    /// and merges results. If no analyzer applies, falls back to C#.
+    /// Analyze a codebase at the given path. Runs only analyzers that CanAnalyze that exact path
+    /// (C#, Go, Rust, Frontend, etc.) and merges results. No parent or sibling directories are scanned.
     /// </summary>
     public async Task<CodebaseAnalysis> AnalyzeAsync(string codebasePath, string codebaseName, CancellationToken cancellationToken = default)
     {
@@ -49,7 +49,7 @@ public class CodeAnalysisAgent
                 throw new InvalidOperationException("No codebase analyzer is applicable for this path and no C# fallback is registered.");
         }
 
-        _logger?.LogInformation("[CodeAnalysis] Running {Count} analyzer(s): {Languages}",
+        _logger?.LogInformation("[CodeAnalysis] Running {Count} analyzer(s) on path only: {Languages}",
             applicable.Count, string.Join(", ", applicable.Select(a => a.LanguageId)));
 
         var partialResults = new List<CodebaseAnalysis>();
@@ -71,8 +71,8 @@ public class CodeAnalysisAgent
             throw new InvalidOperationException("All applicable analyzers failed.");
 
         var merged = MergeAnalyses(codebasePath, codebaseName, partialResults);
-        _logger?.LogInformation("[CodeAnalysis] Analysis complete: {Classes} classes, {Interfaces} interfaces, languages: {Languages}",
-            merged.Summary.TotalClasses, merged.Summary.TotalInterfaces, string.Join(", ", merged.Summary.Languages));
+        _logger?.LogInformation("[CodeAnalysis] Analysis complete: {Projects} projects, {Classes} classes, {Interfaces} interfaces, languages: {Languages}",
+            merged.Projects.Count, merged.Summary.TotalClasses, merged.Summary.TotalInterfaces, string.Join(", ", merged.Summary.Languages));
         return merged;
     }
 

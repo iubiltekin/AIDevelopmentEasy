@@ -272,7 +272,10 @@ public class CodebasesController : ControllerBase
             LanguageId = p.LanguageId ?? string.Empty,
             Role = p.Role ?? string.Empty,
             RootPath = p.RootPath ?? string.Empty
-        });
+        }).ToList();
+
+        _logger.LogInformation("[GetProjects] Codebase {Id}: returning {Count} project(s): {Names}",
+            id, projects.Count, string.Join(", ", projects.Select(x => x.Name)));
 
         return Ok(projects);
     }

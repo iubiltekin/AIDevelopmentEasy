@@ -212,6 +212,12 @@ public class FileSystemCodebaseRepository : ICodebaseRepository
 
             metadata.Status = CodebaseStatus.Ready;
             metadata.AnalyzedAt = analysis.AnalyzedAt;
+            // When analysis used parent dir (polyglot), keep codebase path in sync with effective root
+            if (!string.IsNullOrEmpty(analysis.CodebasePath) && analysis.CodebasePath != metadata.Path)
+            {
+                _logger.LogInformation("Updating codebase path to effective root: {Path} (was: {Old})", analysis.CodebasePath, metadata.Path);
+                metadata.Path = analysis.CodebasePath;
+            }
 
             var updatedJson = JsonSerializer.Serialize(metadata, _jsonOptions);
             await File.WriteAllTextAsync(metadataPath2, updatedJson, cancellationToken);

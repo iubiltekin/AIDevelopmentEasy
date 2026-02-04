@@ -29,11 +29,12 @@ export function SearchableSelect({
   const [searchTerm, setSearchTerm] = useState('');
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sort options alphabetically
-  const sortedOptions = [...options].sort((a, b) => 
+  const sortedOptions = [...options].sort((a, b) =>
     a.label.localeCompare(b.label)
   );
 
@@ -46,13 +47,13 @@ export function SearchableSelect({
   // Get selected option label
   const selectedOption = options.find(o => o.value === value);
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside (dropdown is portaled to body, so check both refs)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-        setSearchTerm('');
-      }
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target) || dropdownRef.current?.contains(target)) return;
+      setIsOpen(false);
+      setSearchTerm('');
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -64,7 +65,7 @@ export function SearchableSelect({
     if (isOpen && inputRef.current) {
       inputRef.current.focus();
     }
-    
+
     // Calculate dropdown position
     if (isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
@@ -93,7 +94,7 @@ export function SearchableSelect({
 
     window.addEventListener('scroll', updatePosition, true);
     window.addEventListener('resize', updatePosition);
-    
+
     return () => {
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
@@ -132,8 +133,8 @@ export function SearchableSelect({
         </span>
         <div className="flex items-center gap-1">
           {value && !disabled && (
-            <X 
-              className="w-4 h-4 text-slate-400 hover:text-white" 
+            <X
+              className="w-4 h-4 text-slate-400 hover:text-white"
               onClick={handleClear}
             />
           )}
@@ -143,7 +144,8 @@ export function SearchableSelect({
 
       {/* Dropdown - rendered via portal to avoid overflow issues */}
       {isOpen && !disabled && createPortal(
-        <div 
+        <div
+          ref={dropdownRef}
           className="fixed bg-slate-700 border border-slate-600 rounded-lg shadow-2xl overflow-hidden"
           style={{
             top: dropdownPosition.top,

@@ -240,7 +240,22 @@ export const codebasesApi = {
 
   getProjects: async (id: string): Promise<ProjectSummaryDto[]> => {
     const response = await fetch(`${API_BASE}/codebases/${id}/projects`);
-    return handleResponse<ProjectSummaryDto[]>(response);
+    const raw = await handleResponse<unknown>(response);
+    const arr = Array.isArray(raw) ? raw : [];
+    return arr.map((p: Record<string, unknown>) => ({
+      name: (p.name ?? p.Name ?? '') as string,
+      relativePath: (p.relativePath ?? p.RelativePath ?? '') as string,
+      targetFramework: (p.targetFramework ?? p.TargetFramework ?? '') as string,
+      outputType: (p.outputType ?? p.OutputType ?? '') as string,
+      isTestProject: Boolean(p.isTestProject ?? p.IsTestProject),
+      classCount: Number(p.classCount ?? p.ClassCount ?? 0),
+      interfaceCount: Number(p.interfaceCount ?? p.InterfaceCount ?? 0),
+      detectedPatterns: (p.detectedPatterns ?? p.DetectedPatterns ?? []) as string[],
+      projectReferences: (p.projectReferences ?? p.ProjectReferences ?? []) as string[],
+      languageId: (p.languageId ?? p.LanguageId ?? '') as string,
+      role: (p.role ?? p.Role ?? '') as string,
+      rootPath: (p.rootPath ?? p.RootPath ?? '') as string
+    })) as ProjectSummaryDto[];
   },
 
   getProjectFiles: async (codebaseId: string, projectName: string): Promise<FileInfoDto[]> => {

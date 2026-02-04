@@ -205,6 +205,8 @@ builder.Services.AddSingleton(sp =>
     new RequirementAnalystAgent(openAIClient, deploymentName, sp.GetRequiredService<ILogger<RequirementAnalystAgent>>()));
 
 // Pipeline Services
+builder.Services.AddSingleton<IStoryNameGenerator>(sp =>
+    new StoryNameGenerator(openAIClient, deploymentName, sp.GetRequiredService<ILogger<StoryNameGenerator>>()));
 builder.Services.AddSingleton<IPipelineNotificationService, SignalRPipelineNotificationService>();
 builder.Services.AddSingleton<IPipelineService, PipelineService>();
 

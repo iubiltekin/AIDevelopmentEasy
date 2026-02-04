@@ -1,5 +1,6 @@
 using AIDevelopmentEasy.Api.Models;
 using AIDevelopmentEasy.Api.Repositories.Interfaces;
+using AIDevelopmentEasy.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AIDevelopmentEasy.Api.Controllers;
@@ -14,17 +15,20 @@ public class StoriesController : ControllerBase
     private readonly IStoryRepository _storyRepository;
     private readonly ITaskRepository _taskRepository;
     private readonly IApprovalRepository _approvalRepository;
+    private readonly IStoryNameGenerator _storyNameGenerator;
     private readonly ILogger<StoriesController> _logger;
 
     public StoriesController(
         IStoryRepository storyRepository,
         ITaskRepository taskRepository,
         IApprovalRepository approvalRepository,
+        IStoryNameGenerator storyNameGenerator,
         ILogger<StoriesController> logger)
     {
         _storyRepository = storyRepository;
         _taskRepository = taskRepository;
         _approvalRepository = approvalRepository;
+        _storyNameGenerator = storyNameGenerator;
         _logger = logger;
     }
 
@@ -45,7 +49,7 @@ public class StoriesController : ControllerBase
     public async Task<ActionResult<StoryDto>> GetById(string id, CancellationToken cancellationToken)
     {
         var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
-        
+
         if (story == null)
             return NotFound();
 
@@ -59,7 +63,7 @@ public class StoriesController : ControllerBase
     public async Task<ActionResult<string>> GetContent(string id, CancellationToken cancellationToken)
     {
         var content = await _storyRepository.GetContentAsync(id, cancellationToken);
-        
+
         if (content == null)
             return NotFound();
 
@@ -73,16 +77,17 @@ public class StoriesController : ControllerBase
     public async Task<ActionResult> UpdateContent(string id, [FromBody] UpdateContentRequest request, CancellationToken cancellationToken)
     {
         var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
-        
+
         if (story == null)
             return NotFound();
 
         // Only allow editing if not started (Draft state)
         if (story.Status != StoryStatus.NotStarted)
         {
-            return BadRequest(new { 
-                error = "Cannot edit content", 
-                message = "Story must be reset before editing. Current status: " + story.Status 
+            return BadRequest(new
+            {
+                error = "Cannot edit content",
+                message = "Story must be reset before editing. Current status: " + story.Status
             });
         }
 
@@ -98,7 +103,7 @@ public class StoriesController : ControllerBase
         }
 
         var updated = await _storyRepository.UpdateContentAsync(id, request.Content, cancellationToken);
-        
+
         if (!updated)
             return NotFound();
 
@@ -107,17 +112,39 @@ public class StoriesController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new story
+    /// Create a new story. Name is optional; when empty, a title is generated from content via LLM.
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<StoryDto>> Create([FromBody] CreateStoryRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Content))
+        if (string.IsNullOrWhiteSpace(request.Content))
+            return BadRequest("Content is required");
+
+        var name = request.Name?.Trim();
+        if (string.IsNullOrEmpty(name))
         {
-            return BadRequest("Name and content are required");
+            name = await _storyNameGenerator.GenerateStoryNameAsync(request.Content, cancellationToken);
+            _logger.LogInformation("Generated story name from content: {Name}", name);
         }
 
-        var story = await _storyRepository.CreateAsync(request, cancellationToken);
+        var createRequest = new CreateStoryRequest
+        {
+            Name = name,
+            Content = request.Content,
+            Type = request.Type,
+            CodebaseId = request.CodebaseId,
+            RequirementId = request.RequirementId,
+            TargetProject = request.TargetProject,
+            TargetFile = request.TargetFile,
+            TargetClass = request.TargetClass,
+            TargetMethod = request.TargetMethod,
+            ChangeType = request.ChangeType,
+            TargetTestProject = request.TargetTestProject,
+            TargetTestFile = request.TargetTestFile,
+            TargetTestClass = request.TargetTestClass
+        };
+
+        var story = await _storyRepository.CreateAsync(createRequest, cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = story.Id }, story);
     }
@@ -130,21 +157,22 @@ public class StoriesController : ControllerBase
     public async Task<ActionResult> UpdateTarget(string id, [FromBody] UpdateStoryTargetRequest request, CancellationToken cancellationToken)
     {
         var story = await _storyRepository.GetByIdAsync(id, cancellationToken);
-        
+
         if (story == null)
             return NotFound();
 
         // Only allow updating target if story hasn't started processing
         if (story.Status != StoryStatus.NotStarted && story.Status != StoryStatus.Planned)
         {
-            return BadRequest(new { 
-                error = "Cannot update target", 
-                message = "Story must be reset before updating target info. Current status: " + story.Status 
+            return BadRequest(new
+            {
+                error = "Cannot update target",
+                message = "Story must be reset before updating target info. Current status: " + story.Status
             });
         }
 
         var updated = await _storyRepository.UpdateTargetAsync(id, request, cancellationToken);
-        
+
         if (!updated)
             return NotFound();
 
@@ -159,7 +187,7 @@ public class StoriesController : ControllerBase
     public async Task<ActionResult> Delete(string id, CancellationToken cancellationToken)
     {
         var deleted = await _storyRepository.DeleteAsync(id, cancellationToken);
-        
+
         if (!deleted)
             return NotFound();
 

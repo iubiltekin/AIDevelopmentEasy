@@ -43,6 +43,9 @@ export function StoryDetail() {
   const [targetTestFile, setTargetTestFile] = useState<string>('');
   const [targetTestClass, setTargetTestClass] = useState<string>('');
 
+  // Codebase display (name + path for header/overview)
+  const [codebase, setCodebase] = useState<{ name: string; path: string } | null>(null);
+
   useEffect(() => {
     const load = async () => {
       if (!id) return;
@@ -68,9 +71,13 @@ export function StoryDetail() {
         if (req.targetTestFile) setTargetTestFile(req.targetTestFile);
         if (req.targetTestClass) setTargetTestClass(req.targetTestClass);
 
-        // Load projects if codebase exists
+        // Load codebase and projects if codebase exists
         if (req.codebaseId) {
-          const projs = await codebasesApi.getProjects(req.codebaseId).catch(() => []);
+          const [cb, projs] = await Promise.all([
+            codebasesApi.getById(req.codebaseId).catch(() => null),
+            codebasesApi.getProjects(req.codebaseId).catch(() => [])
+          ]);
+          if (cb) setCodebase({ name: cb.name, path: cb.path });
           setProjects(projs);
           // Separate test projects
           setTestProjects(projs.filter(p => p.isTestProject));
@@ -92,6 +99,8 @@ export function StoryDetail() {
             const testCls = await codebasesApi.getProjectClasses(req.codebaseId, req.targetTestProject).catch(() => []);
             setTestClasses(testCls);
           }
+        } else {
+          setCodebase(null);
         }
 
         if (req.status === StoryStatus.Completed) {
@@ -180,9 +189,21 @@ export function StoryDetail() {
     }
   };
 
+  // Language-based labels for target dropdowns (multi-language support)
+  const selectedProject = projects.find(p => p.name === targetProject);
+  const langId = (selectedProject?.languageId ?? 'csharp').toLowerCase();
+  const targetLabels = {
+    project: langId === 'go' ? 'Module' : langId === 'rust' ? 'Crate' : langId === 'python' ? 'Package' : langId === 'typescript' ? 'Project' : 'Project',
+    type: langId === 'go' ? 'Type' : langId === 'rust' ? 'Type' : langId === 'python' ? 'Class' : langId === 'typescript' ? 'Component' : 'Class',
+    method: langId === 'go' ? 'Function' : langId === 'rust' ? 'Function' : langId === 'python' ? 'Function' : langId === 'typescript' ? '—' : 'Method',
+    testProject: langId === 'go' ? 'Test Module' : langId === 'rust' ? 'Test Crate' : 'Test Project',
+    testType: langId === 'go' ? 'Test Type' : langId === 'rust' ? 'Test Type' : 'Test Class'
+  };
+  const showMethodField = methods.length > 0 || langId === 'csharp';
+
   const handleSaveTarget = async () => {
     if (!id) return;
-    
+
     setTargetSaving(true);
     try {
       await storiesApi.updateTarget(id, {
@@ -220,12 +241,12 @@ export function StoryDetail() {
 
   const handleStart = async () => {
     if (!id) return;
-    
+
     // Save target info if dirty before starting
     if (targetDirty) {
       await handleSaveTarget();
     }
-    
+
     try {
       await pipelineApi.start(id);
       navigate(`/pipeline/${id}`);
@@ -369,7 +390,22 @@ export function StoryDetail() {
               <StatusBadge status={story.status} />
             </div>
             <p className="text-slate-400">
-              {story.codebaseId ? 'With codebase context' : 'New project story'}
+              {story.codebaseId ? (
+                <>
+                  {codebase ? (
+                    <Link to={`/codebases/${story.codebaseId}`} className="text-emerald-400 hover:text-emerald-300">
+                      {codebase.name}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-500">Codebase: {story.codebaseId}</span>
+                  )}
+                  {codebase?.path && (
+                    <span className="text-slate-500 font-mono text-sm block mt-0.5">{codebase.path}</span>
+                  )}
+                </>
+              ) : (
+                'New project story'
+              )}
             </p>
           </div>
         </div>
@@ -436,7 +472,7 @@ export function StoryDetail() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-white">Target Information</h3>
-                <p className="text-sm text-slate-400">Specify where changes should be made (optional)</p>
+                <p className="text-sm text-slate-400">Where to implement (optional). Options adapt to the codebase (e.g. Module/Type for Go, Project/Class for C#).</p>
               </div>
             </div>
             {targetDirty && (
@@ -459,11 +495,10 @@ export function StoryDetail() {
                 <button
                   key={type}
                   onClick={() => handleChangeTypeChange(type)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    changeType === type
-                      ? `${getChangeTypeColor(type)} text-white`
-                      : 'bg-slate-700 text-slate-400 hover:text-white'
-                  }`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${changeType === type
+                    ? `${getChangeTypeColor(type)} text-white`
+                    : 'bg-slate-700 text-slate-400 hover:text-white'
+                    }`}
                 >
                   {getChangeTypeLabel(type)}
                 </button>
@@ -471,26 +506,34 @@ export function StoryDetail() {
             </div>
           </div>
 
-          {/* Code Target Row */}
+          {/* Development path (root path of selected project) */}
+          {selectedProject?.rootPath && (
+            <div className="mb-4 p-2 bg-slate-900 rounded-lg">
+              <span className="text-sm text-slate-400">Development path: </span>
+              <span className="text-sm text-white font-mono">{selectedProject.rootPath}</span>
+            </div>
+          )}
+
+          {/* Code Target Row - all non-test projects (backend, frontend, any language) */}
           <div className="grid grid-cols-4 gap-4 mb-4">
-            {/* Project Dropdown */}
+            {/* Project/Module/Crate Dropdown - show language and role so Go + React both visible */}
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Project</label>
+              <label className="block text-sm text-slate-400 mb-1">{targetLabels.project}</label>
               <SearchableSelect
                 value={targetProject}
                 onChange={handleProjectChange}
-                options={projects.filter(p => !p.isTestProject).map(p => ({
-                  value: p.name,
-                  label: p.name,
-                  sublabel: `${p.classCount} classes`
-                }))}
-                placeholder="Any Project"
+                options={projects.filter(p => !p.isTestProject).map(p => {
+                  const roleLang = [p.role, p.languageId].filter(Boolean).join(' · ') || p.targetFramework || '';
+                  const sublabel = [roleLang, p.rootPath, `${p.classCount} types`].filter(Boolean).join(' · ');
+                  return { value: p.name, label: p.name, sublabel };
+                })}
+                placeholder={`Any ${targetLabels.project}`}
               />
             </div>
 
-            {/* Class Dropdown */}
+            {/* Class/Type/Component Dropdown */}
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Class</label>
+              <label className="block text-sm text-slate-400 mb-1">{targetLabels.type}</label>
               <SearchableSelect
                 value={targetClass}
                 onChange={handleClassChange}
@@ -499,26 +542,30 @@ export function StoryDetail() {
                   label: c.name,
                   sublabel: c.filePath
                 }))}
-                placeholder="Any Class"
+                placeholder={`Any ${targetLabels.type}`}
                 disabled={!targetProject}
               />
             </div>
 
-            {/* Method Dropdown */}
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Method</label>
-              <SearchableSelect
-                value={targetMethod}
-                onChange={handleMethodChange}
-                options={methods.map(m => ({
-                  value: m.name,
-                  label: m.name,
-                  sublabel: `${m.returnType}(${m.parameters.length} params)`
-                }))}
-                placeholder="Any Method"
-                disabled={!targetClass}
-              />
-            </div>
+            {/* Method/Function Dropdown - only when methods exist or C# */}
+            {showMethodField ? (
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">{targetLabels.method}</label>
+                <SearchableSelect
+                  value={targetMethod}
+                  onChange={handleMethodChange}
+                  options={methods.map(m => ({
+                    value: m.name,
+                    label: m.name,
+                    sublabel: `${m.returnType}(${m.parameters.length} params)`
+                  }))}
+                  placeholder={`Any ${targetLabels.method}`}
+                  disabled={!targetClass}
+                />
+              </div>
+            ) : (
+              <div />
+            )}
 
             {/* File Path (auto-filled) */}
             <div>
@@ -527,33 +574,30 @@ export function StoryDetail() {
                 type="text"
                 value={targetFile}
                 onChange={(e) => { setTargetFile(e.target.value); setTargetDirty(true); }}
-                placeholder="Auto-filled from class"
+                placeholder="Auto-filled from type"
                 className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Test Target Row - Below Code Target */}
-          {testProjects.length > 0 && (
+          {/* Test Target: dedicated test projects (C#) or optional "where to add tests" (Go, polyglot) */}
+          {testProjects.length > 0 ? (
             <div className="grid grid-cols-4 gap-4">
-              {/* Test Project Dropdown */}
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Test Project</label>
+                <label className="block text-sm text-slate-400 mb-1">{targetLabels.testProject}</label>
                 <SearchableSelect
                   value={targetTestProject}
                   onChange={handleTestProjectChange}
                   options={testProjects.map(p => ({
                     value: p.name,
                     label: p.name,
-                    sublabel: `${p.classCount} test classes`
+                    sublabel: `${p.classCount} test types`
                   }))}
-                  placeholder="Select Test Project"
+                  placeholder={`Select ${targetLabels.testProject}`}
                 />
               </div>
-
-              {/* Test Class Dropdown */}
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Test Class</label>
+                <label className="block text-sm text-slate-400 mb-1">{targetLabels.testType}</label>
                 <SearchableSelect
                   value={targetTestClass}
                   onChange={handleTestClassChange}
@@ -562,27 +606,41 @@ export function StoryDetail() {
                     label: c.name,
                     sublabel: c.filePath
                   }))}
-                  placeholder="Select Test Class"
+                  placeholder={`Select ${targetLabels.testType}`}
                   disabled={!targetTestProject}
                 />
               </div>
-
-              {/* Test File Path (auto-filled) */}
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Test File</label>
                 <input
                   type="text"
                   value={targetTestFile}
                   onChange={(e) => { setTargetTestFile(e.target.value); setTargetDirty(true); }}
-                  placeholder="Auto-filled from class"
+                  placeholder="Auto-filled from type"
                   className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                 />
               </div>
-
-              {/* Empty cell for alignment */}
-              <div></div>
+              <div />
             </div>
-          )}
+          ) : projects.length > 0 ? (
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Where to add tests (optional)</label>
+                <SearchableSelect
+                  value={targetTestProject}
+                  onChange={handleTestProjectChange}
+                  options={projects.filter(p => !p.isTestProject).map(p => {
+                    const roleLang = [p.role, p.languageId].filter(Boolean).join(' · ') || '';
+                    return { value: p.name, label: p.name, sublabel: [roleLang, p.rootPath].filter(Boolean).join(' · ') };
+                  })}
+                  placeholder="Same module or another package"
+                />
+              </div>
+              <div />
+              <div />
+              <div />
+            </div>
+          ) : null}
 
           {/* Selected Target Summary */}
           {(targetProject || targetClass || targetMethod || targetTestClass) && (
@@ -643,7 +701,22 @@ export function StoryDetail() {
                 <div>
                   <dt className="text-sm text-slate-400">Codebase</dt>
                   <dd className="text-white">
-                    {story.codebaseId || 'None (new project)'}
+                    {story.codebaseId ? (
+                      <>
+                        {codebase ? (
+                          <Link to={`/codebases/${story.codebaseId}`} className="text-emerald-400 hover:text-emerald-300">
+                            {codebase.name}
+                          </Link>
+                        ) : (
+                          story.codebaseId
+                        )}
+                        {codebase?.path && (
+                          <span className="block text-slate-500 font-mono text-sm mt-0.5">{codebase.path}</span>
+                        )}
+                      </>
+                    ) : (
+                      'None (new project)'
+                    )}
                   </dd>
                 </div>
                 <div>
@@ -723,7 +796,7 @@ export function StoryDetail() {
                 </div>
               )}
             </div>
-            
+
             {isEditing ? (
               <div className="space-y-4">
                 {/* Name Input */}
@@ -737,7 +810,7 @@ export function StoryDetail() {
                     placeholder="Enter story name..."
                   />
                 </div>
-                
+
                 {/* Content Textarea */}
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">Content</label>
@@ -792,10 +865,9 @@ export function StoryDetail() {
                 {story.tasks.map((task, index) => (
                   <div
                     key={index}
-                    className={`p-4 bg-slate-900 rounded-lg border ${
-                      task.type === TaskType.Fix
-                        ? 'border-red-500/50 bg-red-950/20'
-                        : task.isModification
+                    className={`p-4 bg-slate-900 rounded-lg border ${task.type === TaskType.Fix
+                      ? 'border-red-500/50 bg-red-950/20'
+                      : task.isModification
                         ? 'border-amber-500/50'
                         : 'border-slate-700'
                       }`}
