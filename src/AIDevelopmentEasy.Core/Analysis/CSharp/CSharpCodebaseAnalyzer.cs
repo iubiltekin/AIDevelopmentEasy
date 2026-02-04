@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using AIDevelopmentEasy.Core.Analysis;
 using AIDevelopmentEasy.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -300,6 +301,12 @@ public class CSharpCodebaseAnalyzer : ICodebaseAnalyzer
         sb.AppendLine($"Framework: {analysis.Summary.PrimaryFramework}");
         sb.AppendLine($"Patterns: {string.Join(", ", analysis.Summary.DetectedPatterns)}");
         sb.AppendLine();
+
+        var packages = analysis.Projects.SelectMany(p => p.PackageReferences.Select(r => (r.Name, (string?)r.Version)));
+        var integrationsText = IntegrationCategorizer.BuildIntegrationsSection(packages);
+        if (!string.IsNullOrEmpty(integrationsText))
+            sb.AppendLine(integrationsText);
+
         sb.AppendLine("## Conventions");
         sb.AppendLine($"- Naming: {analysis.Conventions.NamingStyle}");
         sb.AppendLine($"- Private field prefix: {analysis.Conventions.PrivateFieldPrefix}");

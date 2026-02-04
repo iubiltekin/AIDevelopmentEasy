@@ -50,6 +50,9 @@ public class PlannerAgent : BaseAgent
         // Generate context string from analysis
         var codebaseContext = _codeAnalysisAgent.GenerateContextForPrompt(codebaseAnalysis);
 
+        var languages = codebaseAnalysis.Summary.Languages ?? new List<string>();
+        var languagesStr = languages.Count > 0 ? string.Join(", ", languages) : "csharp";
+
         var request = new AgentRequest
         {
             Input = requirement,
@@ -59,10 +62,13 @@ public class PlannerAgent : BaseAgent
                 ["codebase_context"] = codebaseContext,
                 ["codebase_name"] = codebaseAnalysis.CodebaseName,
                 ["primary_framework"] = codebaseAnalysis.Summary.PrimaryFramework,
+                ["languages"] = languagesStr,
                 ["test_framework"] = codebaseAnalysis.Conventions.TestFramework ?? "NUnit",
                 ["private_field_prefix"] = codebaseAnalysis.Conventions.PrivateFieldPrefix
             }
         };
+
+        _logger?.LogInformation("[Planner] Codebase languages: {Languages} – plan tasks with matching file extensions", languagesStr);
 
         return await RunAsync(request, cancellationToken);
     }
@@ -119,74 +125,29 @@ If codebase context is provided:
 5. **Namespace Matching**: New classes should use namespaces matching their folder location
 6. **Test Structure**: Place tests in the corresponding UnitTest project using the same folder structure
 
-## File Placement Rules (CRITICAL)
+## File Placement (codebase-driven)
 
-When adding new code to an existing codebase:
+When codebase context is provided, it contains a ""Languages and file extensions"" section for **this repo only**. Use ONLY those extensions per project in target_files. Do not use .py unless a project in that section has language Python; do not use .cs unless csharp is listed; match each target_file to its project's extension.
 
-- **Helper classes**: [ProjectName]/Helpers/[HelperName].cs → namespace [RootNamespace].Helpers
-- **Service classes**: [ProjectName]/Services/[ServiceName].cs → namespace [RootNamespace].Services
-- **Model classes**: [ProjectName]/Models/[ModelName].cs → namespace [RootNamespace].Models
-- **Unit tests**: Tests/[ProjectName].UnitTest/[ClassName]Tests.cs
+## Create vs Modify (inferred from requirement)
 
-## Testing Strategy
-
-- Use the test framework detected in the codebase (NUnit, xUnit, or MSTest)
-- Use FluentAssertions for readable assertions when available
-- Use Arrange-Act-Assert pattern
-- Method naming: MethodName_Scenario_ExpectedResult
+Decide **per task** whether the task **creates** new file(s) or **modifies** existing file(s). Infer from the requirement and codebase context (e.g. ""add a new service"" → create; ""fix the bug in UserController"" → modify). Output for each task: ""modification_type"": ""create"" or ""modification_type"": ""modify"".
 
 ## Output Format (JSON)
 
 ### CRITICAL: Namespace Requirement
 - Every task MUST include a ""namespace"" field
 - The namespace determines where the file will be placed in the project
-- Format: ProjectName.FolderName (e.g., Picus.Common.Helpers)
+- Format: ProjectName.FolderName(e.g., Picus.Common.Helpers)
 
-### For Standalone Projects (no codebase context):
+### CRITICAL: modification_type
+- Every task MUST include ""modification_type"": ""create"" or ""modify"" based on the requirement.
 
-{
-    ""project_name"": ""Short project name"",
-    ""summary"": ""Brief summary of what will be built"",
-    ""tasks"": [
-        {
-            ""index"": 1,
-            ""title"": ""Short descriptive title"",
-            ""description"": ""Detailed description of what to implement"",
-            ""target_files"": [""ClassName.cs""],
-            ""namespace"": ""ProjectName""
-        }
-    ]
-}
+### Standalone (no codebase): target_files use appropriate extension for the project type.
 
-### For Existing Codebase Integration:
+### With codebase context: use ONLY the file extensions from the ""Languages and file extensions"" section for each project. Include modification_type in each task.
 
-{
-    ""project_name"": ""Feature name"",
-    ""summary"": ""Brief description"",
-    ""tasks"": [
-        {
-            ""index"": 1,
-            ""project"": ""ProjectName"",
-            ""title"": ""Create helper class"",
-            ""description"": ""Detailed implementation description"",
-            ""target_files"": [""Helpers/HelperName.cs""],
-            ""namespace"": ""ProjectName.Helpers"",
-            ""depends_on"": [],
-            ""uses_existing"": []
-        },
-        {
-            ""index"": 2,
-            ""project"": ""ProjectName.UnitTest"",
-            ""title"": ""Unit tests"",
-            ""description"": ""Write unit tests"",
-            ""target_files"": [""Helpers/HelperNameTests.cs""],
-            ""namespace"": ""ProjectName.UnitTest.Helpers"",
-            ""depends_on"": [1]
-        }
-    ]
-}
-
-IMPORTANT: Output ONLY valid JSON, no explanations before or after.";
+Output ONLY valid JSON.";
     }
 
     protected override string GetSystemPrompt()
@@ -218,26 +179,14 @@ IMPORTANT: Output ONLY valid JSON, no explanations before or after.";
 
 {ctx}
 
-## INTEGRATION GUIDELINES
+## INTEGRATION GUIDELINES (for this codebase only)
 
-When creating tasks for this existing codebase:
-
-1. **Project Placement**: Identify which existing project(s) should contain the new code
-2. **Namespace Convention**: Follow existing namespace patterns (e.g., ProjectName.SubFolder)
-3. **Patterns**: Use detected patterns (Repository, Service, Helper, etc.)
-4. **Conventions**: 
-   - Private fields: {fieldPrefix}fieldName
-   - Test framework: {testFramework}
-5. **Dependencies**: Reference existing interfaces and base classes
-6. **Test Projects**: Place tests in corresponding *.Tests project
-
-## TASK STRUCTURE FOR MULTI-PROJECT
-
-For each task, specify:
-- **project**: Which project this task belongs to
-- **target_files**: File paths within that project (e.g., ""Helpers/LogRotator.cs"")
-- **depends_on**: Tasks that must complete first (by index)
-- **uses_existing**: Existing classes/interfaces to use or extend
+1. **File extensions**: Use ONLY the extensions from the ""Languages and file extensions"" section above for each project. Never use .py unless a project in that section has language Python; never use .cs unless csharp is listed; never use .go unless go is listed; match extension to the project.
+2. **Project placement**: Put code in the project(s) and paths shown above.
+3. **Namespace/Package/Module**: Follow the convention shown in the codebase context for each project.
+4. **Conventions**: Private fields: {fieldPrefix}fieldName; Test framework: {testFramework}.
+5. **Tests**: Place in the test project/path from context, with the same file extension as that project.
+6. **Task fields**: project, target_files (paths with correct extension), depends_on, uses_existing.
 ";
                 _logger?.LogInformation("[Planner] Using codebase context for planning: {Name}", codebaseName);
             }
@@ -308,6 +257,10 @@ For each task, specify:
                     // Parse namespace (CRITICAL for correct code generation)
                     var taskNamespace = taskEl.TryGetProperty("namespace", out var ns) ? ns.GetString() : null;
 
+                    // Parse modification_type (create vs modify) - LLM infers from requirement and codebase context
+                    var modType = taskEl.TryGetProperty("modification_type", out var mt) ? mt.GetString() : null;
+                    var isModification = string.Equals(modType, "modify", StringComparison.OrdinalIgnoreCase);
+
                     tasks.Add(new SubTask
                     {
                         Index = taskEl.TryGetProperty("index", out var idx) ? idx.GetInt32() : tasks.Count + 1,
@@ -317,7 +270,8 @@ For each task, specify:
                         ProjectName = taskProject,
                         DependsOn = dependsOn,
                         UsesExisting = usesExisting,
-                        Namespace = taskNamespace
+                        Namespace = taskNamespace,
+                        IsModification = isModification
                     });
                 }
             }
@@ -373,10 +327,15 @@ For each task, specify:
 # INSTRUCTIONS
 
 1. Analyze how this requirement fits into the existing codebase structure
-2. Identify which projects need modifications
+2. Identify which projects need modifications and whether each change creates new files or modifies existing ones
 3. Create tasks that follow existing patterns and conventions
 4. Order tasks by dependency (core implementations first, then consumers, then tests)
-5. Each task MUST specify the target project, files, AND namespace
+5. Each task MUST specify the target project, files, namespace, and modification_type (create or modify)
+6. Each target_file MUST use the file extension for that project from the ""Languages and file extensions"" section (e.g. Go project → .go, TypeScript/React → .tsx, not .py unless the project language is Python)
+
+## CRITICAL: modification_type
+- For each task set ""modification_type"": ""create"" (new file) or ""modify"" (existing file), based on the requirement and codebase context
+- Infer from the requirement: e.g. ""add new endpoint"" → create or modify; ""fix bug in X"" → modify
 
 ## CRITICAL: Namespace Convention
 - For each task, you MUST specify the FULL namespace
@@ -394,24 +353,38 @@ Output the plan as JSON with the following structure:
             ""project"": ""ProjectName"",
             ""title"": ""Task title"",
             ""description"": ""Detailed implementation description"",
-            ""target_files"": [""Folder/FileName.cs""],
+            ""target_files"": [""Folder/FileName.<ext>""],
             ""namespace"": ""ProjectName.Folder"",
+            ""modification_type"": ""create"" or ""modify"",
             ""depends_on"": [],
             ""uses_existing"": [""ExistingClass"", ""IExistingInterface""]
         }}
     ]
 }}
 
-Example for a DateTimeHelper class in Picus.Common project:
+Example (new file):
 {{
     ""index"": 1,
     ""project"": ""Picus.Common"",
     ""title"": ""Create DateTimeHelper class"",
     ""description"": ""Create DateTimeHelper class with AddDays method"",
-    ""target_files"": [""Helpers/DateTimeHelper.cs""],
+    ""target_files"": [""Helpers/DateTimeHelper.<ext>""],
     ""namespace"": ""Picus.Common.Helpers"",
+    ""modification_type"": ""create"",
     ""depends_on"": [],
     ""uses_existing"": []
+}}
+Example (modify existing):
+{{
+    ""index"": 2,
+    ""project"": ""Picus.Api"",
+    ""title"": ""Add validation to UserController"",
+    ""description"": ""Add input validation to the create method"",
+    ""target_files"": [""Controllers/UserController.<ext>""],
+    ""namespace"": ""Picus.Api.Controllers"",
+    ""modification_type"": ""modify"",
+    ""depends_on"": [1],
+    ""uses_existing"": [""UserController""]
 }}";
     }
 

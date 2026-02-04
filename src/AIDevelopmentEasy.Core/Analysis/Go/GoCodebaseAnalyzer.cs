@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Core.Analysis;
 using AIDevelopmentEasy.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,7 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
 
     private static readonly Regex ModuleRegex = new(@"^\s*module\s+(.+)$", RegexOptions.Multiline);
     private static readonly Regex GoVersionRegex = new(@"^\s*go\s+([\d.]+)", RegexOptions.Multiline);
+    private static readonly Regex RequireLineRegex = new(@"^\s*require\s+(\S+)\s+(\S+)", RegexOptions.Multiline);
     private static readonly Regex PackageRegex = new(@"^\s*package\s+(\w+)", RegexOptions.Multiline);
     private static readonly Regex TypeStructRegex = new(@"type\s+(\w+)\s+struct\s*(?:\{[^}]*\})?", RegexOptions.Compiled);
     private static readonly Regex TypeInterfaceRegex = new(@"type\s+(\w+)\s+interface\s*(?:\{[^}]*\})?", RegexOptions.Compiled);
@@ -94,6 +96,48 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         return fullPath;
     }
 
+    private static void ParseGoModRequires(string goModContent, ProjectInfo projectInfo)
+    {
+        foreach (Match m in RequireLineRegex.Matches(goModContent))
+        {
+            var module = m.Groups[1].Value.Trim();
+            var version = m.Groups[2].Value.Trim();
+            if (string.IsNullOrEmpty(module) || module.StartsWith("("))
+                continue;
+            if (!projectInfo.PackageReferences.Any(p => p.Name == module))
+                projectInfo.PackageReferences.Add(new PackageReference { Name = module, Version = version });
+        }
+        var inRequire = false;
+        foreach (var line in goModContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("require ", StringComparison.Ordinal))
+            {
+                var rest = trimmed.Substring(8).Trim();
+                if (rest.StartsWith("("))
+                {
+                    inRequire = true;
+                    continue;
+                }
+                var parts = rest.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && !string.IsNullOrEmpty(parts[0]) && !projectInfo.PackageReferences.Any(p => p.Name == parts[0]))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = parts[0], Version = parts[1] });
+                continue;
+            }
+            if (inRequire)
+            {
+                if (trimmed == ")")
+                {
+                    inRequire = false;
+                    continue;
+                }
+                var parts = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && !string.IsNullOrEmpty(parts[0]) && !projectInfo.PackageReferences.Any(p => p.Name == parts[0]))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = parts[0], Version = parts[1] });
+            }
+        }
+    }
+
     private async Task<ProjectInfo?> ParseGoModAsync(string goModPath, string basePath, CancellationToken cancellationToken)
     {
         var moduleDir = Path.GetDirectoryName(goModPath)!;
@@ -114,6 +158,8 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
             OutputType = "Exe",
             RootNamespace = moduleName
         };
+
+        ParseGoModRequires(content, projectInfo);
 
         var goFiles = Directory.GetFiles(moduleDir, "*.go", SearchOption.AllDirectories)
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "vendor" + Path.DirectorySeparatorChar))
@@ -334,6 +380,10 @@ public class GoCodebaseAnalyzer : ICodebaseAnalyzer
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
         sb.AppendLine($"Language: Go | Conventions: MixedCaps (exported), camelCase (unexported)");
+        var packages = analysis.Projects.SelectMany(p => p.PackageReferences.Select(r => (r.Name, (string?)r.Version)));
+        var integrationsText = IntegrationCategorizer.BuildIntegrationsSection(packages);
+        if (!string.IsNullOrEmpty(integrationsText))
+            sb.AppendLine(integrationsText);
         sb.AppendLine();
         foreach (var project in context.ProjectDetails)
         {

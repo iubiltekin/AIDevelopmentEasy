@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Core.Analysis;
 using AIDevelopmentEasy.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -116,19 +117,6 @@ public class FrontendCodebaseAnalyzer : ICodebaseAnalyzer
         var projectDir = Path.GetDirectoryName(packageJsonPath)!;
         string projectName = Path.GetFileName(projectDir);
 
-        try
-        {
-            var json = await File.ReadAllTextAsync(packageJsonPath, cancellationToken);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("name", out var nameEl))
-                projectName = nameEl.GetString() ?? projectName;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Error reading package.json: {Path}", packageJsonPath);
-        }
-
         var projectInfo = new ProjectInfo
         {
             Name = projectName,
@@ -139,6 +127,20 @@ public class FrontendCodebaseAnalyzer : ICodebaseAnalyzer
             OutputType = "Library",
             RootNamespace = projectName
         };
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(packageJsonPath, cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("name", out var nameEl))
+                projectInfo.Name = nameEl.GetString() ?? projectName;
+            AddPackageJsonDependencies(root, projectInfo);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Error reading package.json: {Path}", packageJsonPath);
+        }
 
         var srcDir = Path.Combine(projectDir, "src");
         var searchDir = Directory.Exists(srcDir) ? srcDir : projectDir;
@@ -165,6 +167,21 @@ public class FrontendCodebaseAnalyzer : ICodebaseAnalyzer
         if (projectInfo.Namespaces.Count == 0) projectInfo.Namespaces.Add("app");
         projectInfo.DetectedPatterns = new List<string> { "Frontend" };
         return projectInfo;
+    }
+
+    private static void AddPackageJsonDependencies(JsonElement root, ProjectInfo projectInfo)
+    {
+        foreach (var key in new[] { "dependencies", "devDependencies" })
+        {
+            if (!root.TryGetProperty(key, out var deps) || deps.ValueKind != JsonValueKind.Object)
+                continue;
+            foreach (var prop in deps.EnumerateObject())
+            {
+                var version = prop.Value.GetString() ?? "";
+                if (!projectInfo.PackageReferences.Any(p => p.Name == prop.Name))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = prop.Name, Version = version });
+            }
+        }
     }
 
     private static string? TryGetComponentName(string filePath)
@@ -347,6 +364,10 @@ public class FrontendCodebaseAnalyzer : ICodebaseAnalyzer
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
         sb.AppendLine("Language: TypeScript/React | Conventions: camelCase (functions, variables), PascalCase (components)");
+        var packages = analysis.Projects.SelectMany(p => p.PackageReferences.Select(r => (r.Name, (string?)r.Version)));
+        var integrationsText = IntegrationCategorizer.BuildIntegrationsSection(packages);
+        if (!string.IsNullOrEmpty(integrationsText))
+            sb.AppendLine(integrationsText);
         sb.AppendLine();
         foreach (var project in context.ProjectDetails)
         {

@@ -523,7 +523,25 @@ public class CodeAnalysisAgent
     }
 
     /// <summary>
-    /// Generate a concise context string for use in prompts
+    /// Get the file extension(s) to use for a given language (for planner/coder prompts).
+    /// </summary>
+    private static string GetFileExtensionsForLanguage(string languageId)
+    {
+        return (languageId?.ToLowerInvariant()) switch
+        {
+            "csharp" or "c#" => ".cs",
+            "go" => ".go",
+            "rust" => ".rs",
+            "python" => ".py",
+            "typescript" or "ts" => ".ts, .tsx (use .tsx for React components)",
+            _ => ".cs" // fallback only when unknown
+        };
+    }
+
+    /// <summary>
+    /// Generate a concise context string for use in prompts.
+    /// Language-agnostic: includes each project's language and file extensions so the planner
+    /// generates target_files with correct extensions (e.g. .tsx for React, .go for Go).
     /// </summary>
     public string GenerateContextForPrompt(CodebaseAnalysis analysis)
     {
@@ -531,8 +549,42 @@ public class CodeAnalysisAgent
 
         sb.AppendLine($"## Codebase: {analysis.CodebaseName}");
         sb.AppendLine($"Path: {analysis.CodebasePath}");
-        sb.AppendLine($"Framework: {analysis.Summary.PrimaryFramework}");
-        sb.AppendLine($"Projects: {analysis.Summary.TotalProjects}, Classes: {analysis.Summary.TotalClasses}, Interfaces: {analysis.Summary.TotalInterfaces}");
+        sb.AppendLine($"Projects: {analysis.Summary.TotalProjects}, Classes/Types: {analysis.Summary.TotalClasses}, Interfaces: {analysis.Summary.TotalInterfaces}");
+        if (analysis.Summary.Languages?.Count > 0)
+            sb.AppendLine($"Languages in this repo: {string.Join(", ", analysis.Summary.Languages)}");
+        sb.AppendLine();
+
+        // Codebase-specific: only the languages present in this repo (single source of truth for planner)
+        var languagesInRepo = analysis.Projects
+            .Select(p => (string.IsNullOrEmpty(p.LanguageId) ? "csharp" : p.LanguageId).ToLowerInvariant())
+            .Distinct()
+            .ToHashSet();
+        // Order: put Go, C#, TypeScript/React first so LLM sees primary backend/frontend before Python (avoids .py when repo is Go+React)
+        var langOrder = new[] { "go", "csharp", "typescript", "ts", "rust", "python" };
+        var orderedProjects = analysis.Projects
+            .OrderBy(p => { var l = (string.IsNullOrEmpty(p.LanguageId) ? "csharp" : p.LanguageId).ToLowerInvariant(); var i = Array.IndexOf(langOrder, l); return i < 0 ? 99 : i; })
+            .ThenBy(p => p.Name)
+            .ToList();
+
+        sb.AppendLine("### Languages and file extensions (use ONLY these for this codebase):");
+        foreach (var proj in orderedProjects)
+        {
+            var lang = string.IsNullOrEmpty(proj.LanguageId) ? "csharp" : proj.LanguageId;
+            var ext = GetFileExtensionsForLanguage(lang);
+            var role = string.IsNullOrEmpty(proj.Role) ? "" : $" [{proj.Role}]";
+            sb.AppendLine($"- **{proj.Name}** → language: {lang}{role} → file extensions: {ext}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("→ Generate target_files using ONLY the extensions above for each project.");
+        // Explicit forbidden: do not use extensions for languages NOT in this codebase (fixes .py when repo is Go+React)
+        var forbidden = new List<string>();
+        if (!languagesInRepo.Contains("python")) forbidden.Add(".py");
+        if (!languagesInRepo.Contains("csharp")) forbidden.Add(".cs");
+        if (!languagesInRepo.Contains("go")) forbidden.Add(".go");
+        if (!languagesInRepo.Contains("rust")) forbidden.Add(".rs");
+        if (!languagesInRepo.Contains("typescript") && !languagesInRepo.Contains("ts")) forbidden.Add(".ts/.tsx");
+        if (forbidden.Count > 0)
+            sb.AppendLine($"→ Do NOT use these extensions in this codebase: {string.Join(", ", forbidden)}.");
         sb.AppendLine();
 
         // Separate main projects and test projects
@@ -542,8 +594,11 @@ public class CodeAnalysisAgent
         sb.AppendLine("### Main Projects:");
         foreach (var proj in mainProjects)
         {
-            sb.AppendLine($"- **{proj.Name}** ({proj.OutputType}, {proj.TargetFramework})");
+            var lang = string.IsNullOrEmpty(proj.LanguageId) ? "csharp" : proj.LanguageId;
+            var ext = GetFileExtensionsForLanguage(lang);
+            sb.AppendLine($"- **{proj.Name}** ({proj.OutputType}, {proj.TargetFramework}, language: {lang})");
             sb.AppendLine($"  - Path: {proj.RelativePath}");
+            sb.AppendLine($"  - Use file extension(s): {ext}");
 
             if (proj.ProjectReferences.Any())
             {
@@ -555,7 +610,7 @@ public class CodeAnalysisAgent
                 sb.AppendLine($"  - Patterns: {string.Join(", ", proj.DetectedPatterns)}");
             }
 
-            // Show folder structure with example files
+            // Show folder structure with ACTUAL file paths (so planner sees real extensions: .go, .tsx, etc.)
             var folderGroups = proj.Classes
                 .Where(c => !string.IsNullOrEmpty(c.FilePath))
                 .GroupBy(c => Path.GetDirectoryName(c.FilePath)?.Replace("\\", "/") ?? "")
@@ -566,15 +621,14 @@ public class CodeAnalysisAgent
 
             if (folderGroups.Any())
             {
-                sb.AppendLine($"  - Folder Structure:");
+                sb.AppendLine($"  - Folder Structure (real paths):");
                 foreach (var folder in folderGroups)
                 {
                     var folderName = folder.Key;
-                    var exampleClasses = folder.Take(3).Select(c => $"{c.Name} ({c.Namespace})");
                     sb.AppendLine($"    - {folderName}/");
                     foreach (var cls in folder.Take(3))
                     {
-                        sb.AppendLine($"      - {cls.Name}.cs ? namespace {cls.Namespace}");
+                        sb.AppendLine($"      - {cls.FilePath} (namespace/package: {cls.Namespace})");
                     }
                     if (folder.Count() > 3)
                     {
@@ -595,12 +649,13 @@ public class CodeAnalysisAgent
             }
         }
 
-        // Test Project Mapping
+        // Test Project Mapping (language-agnostic: "test projects" or "where tests go")
         sb.AppendLine();
-        sb.AppendLine("### Test Projects (Unit Tests go here):");
+        sb.AppendLine("### Test Projects (unit tests go here; use same language/extensions as main project):");
         foreach (var testProj in testProjects)
         {
-            // Find corresponding main project
+            var testLang = string.IsNullOrEmpty(testProj.LanguageId) ? "csharp" : testProj.LanguageId;
+            var testExt = GetFileExtensionsForLanguage(testLang);
             var mainProjName = testProj.Name
                 .Replace(".UnitTest", "")
                 .Replace(".Tests", "")
@@ -610,14 +665,13 @@ public class CodeAnalysisAgent
                 p.Name.Equals(mainProjName, StringComparison.OrdinalIgnoreCase) ||
                 p.Name.StartsWith(mainProjName, StringComparison.OrdinalIgnoreCase));
 
-            sb.AppendLine($"- **{testProj.Name}**");
+            sb.AppendLine($"- **{testProj.Name}** (language: {testLang}, extensions: {testExt})");
             sb.AppendLine($"  - Path: {testProj.RelativePath}");
             if (mainProj != null)
             {
                 sb.AppendLine($"  - Tests for: {mainProj.Name}");
             }
 
-            // Show test folder structure
             var testFolders = testProj.Classes
                 .Where(c => !string.IsNullOrEmpty(c.FilePath))
                 .GroupBy(c => Path.GetDirectoryName(c.FilePath)?.Replace("\\", "/") ?? "")
@@ -647,11 +701,12 @@ public class CodeAnalysisAgent
         sb.AppendLine($"- Async suffix: {(analysis.Conventions.UsesAsyncSuffix ? "Yes" : "No")}");
 
         sb.AppendLine();
-        sb.AppendLine("### IMPORTANT - File Placement Rules:");
-        sb.AppendLine("- New Helper classes ? [ProjectName]/Helpers/[HelperName].cs");
-        sb.AppendLine("- New Service classes ? [ProjectName]/Services/[ServiceName].cs");
-        sb.AppendLine("- Unit tests ? Tests/[ProjectName].UnitTest/[ClassName]Tests.cs");
-        sb.AppendLine("- Follow existing namespace conventions in each folder");
+        sb.AppendLine("### File placement (use extensions from Languages section above):");
+        sb.AppendLine("- Helper/utility code: [ProjectPath]/Helpers/[Name]<correct_extension>");
+        sb.AppendLine("- Services: [ProjectPath]/Services/[Name]<correct_extension>");
+        sb.AppendLine("- Models: [ProjectPath]/Models/[Name]<correct_extension>");
+        sb.AppendLine("- Tests: in test project or same package with <correct_test_extension> (e.g. _test.go, .test.ts, Tests.cs for C#)");
+        sb.AppendLine("- Follow existing namespace/package/module conventions in each project");
 
         return sb.ToString();
     }

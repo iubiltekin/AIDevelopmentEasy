@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Core.Analysis;
 using AIDevelopmentEasy.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,10 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
     private readonly ILogger<RustCodebaseAnalyzer>? _logger;
 
     private static readonly Regex PackageNameRegex = new(@"^\s*name\s*=\s*[""](\w+)[""]", RegexOptions.Multiline);
+    // [dependencies] crate = "1.0" or crate = { version = "1.0", ... }
+    private static readonly Regex CargoDepInlineRegex = new(@"^\s*([a-zA-Z0-9_-]+)\s*=\s*[""]([^""]+)[""]", RegexOptions.Multiline);
+    private static readonly Regex CargoDepTableNameRegex = new(@"^\s*([a-zA-Z0-9_-]+)\s*=\s*\{", RegexOptions.Multiline);
+    private static readonly Regex CargoDepVersionInLineRegex = new(@"version\s*=\s*[""]([^""]+)[""]", RegexOptions.Compiled);
     private static readonly Regex ModRegex = new(@"^\s*mod\s+(\w+)", RegexOptions.Multiline);
     private static readonly Regex StructRegex = new(@"struct\s+(\w+)(?:\s*<[^>]+>)?(?:\s*\{[^}]*\})?", RegexOptions.Compiled);
     private static readonly Regex EnumRegex = new(@"enum\s+(\w+)(?:\s*\{[^}]*\})?", RegexOptions.Compiled);
@@ -104,6 +109,8 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
             RootNamespace = packageName
         };
 
+        ParseCargoDependencies(content, projectInfo);
+
         var rsFiles = Directory.GetFiles(projectDir, "*.rs", SearchOption.AllDirectories)
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "target" + Path.DirectorySeparatorChar))
             .ToList();
@@ -131,6 +138,46 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
 
         projectInfo.Namespaces.Add(packageName);
         return projectInfo;
+    }
+
+    private static void ParseCargoDependencies(string cargoContent, ProjectInfo projectInfo)
+    {
+        string? currentSection = null;
+        foreach (var line in cargoContent.Split(new[] { '\r', '\n' }))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("["))
+            {
+                var section = trimmed.TrimStart('[').TrimEnd(']').Trim();
+                if (section.Equals("dependencies", StringComparison.OrdinalIgnoreCase) ||
+                    section.Equals("dev-dependencies", StringComparison.OrdinalIgnoreCase))
+                    currentSection = section;
+                else
+                    currentSection = null;
+                continue;
+            }
+            if (currentSection == null || string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#")) continue;
+
+            // name = "1.0" or name = { version = "1.0", ... }
+            var inline = CargoDepInlineRegex.Match(trimmed);
+            if (inline.Success)
+            {
+                var name = inline.Groups[1].Value;
+                var version = inline.Groups[2].Value;
+                if (!projectInfo.PackageReferences.Any(p => p.Name == name))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = name, Version = version });
+                continue;
+            }
+            var table = CargoDepTableNameRegex.Match(trimmed);
+            if (table.Success)
+            {
+                var name = table.Groups[1].Value;
+                var versionMatch = CargoDepVersionInLineRegex.Match(trimmed);
+                var version = versionMatch.Success ? versionMatch.Groups[1].Value : "";
+                if (!projectInfo.PackageReferences.Any(p => p.Name == name))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = name, Version = version });
+            }
+        }
     }
 
     private CodebaseSummary BuildSummary(CodebaseAnalysis analysis)
@@ -257,6 +304,10 @@ public class RustCodebaseAnalyzer : ICodebaseAnalyzer
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
         sb.AppendLine("Language: Rust | Conventions: snake_case (functions, modules), PascalCase (types, traits)");
+        var packages = analysis.Projects.SelectMany(p => p.PackageReferences.Select(r => (r.Name, (string?)r.Version)));
+        var integrationsText = IntegrationCategorizer.BuildIntegrationsSection(packages);
+        if (!string.IsNullOrEmpty(integrationsText))
+            sb.AppendLine(integrationsText);
         sb.AppendLine();
         foreach (var project in context.ProjectDetails)
         {

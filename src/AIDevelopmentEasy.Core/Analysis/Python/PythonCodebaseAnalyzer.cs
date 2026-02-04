@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AIDevelopmentEasy.Core.Analysis;
 using AIDevelopmentEasy.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +18,12 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
     private static readonly Regex ProjectNameRegex = new(@"^\s*name\s*=\s*[""]([^""]+)[""]", RegexOptions.Multiline);
     private static readonly Regex ClassRegex = new(@"^\s*class\s+(\w+)(?:\(([^)]*)\))?\s*:", RegexOptions.Multiline);
     private static readonly Regex DefRegex = new(@"^\s*def\s+(\w+)\s*\(", RegexOptions.Multiline);
+    // pyproject.toml: [project] dependencies = ["pkg>=1.0", "other"]
+    private static readonly Regex PyProjectDepLineRegex = new(@"[""']([a-zA-Z0-9_-]+)\s*(?:\[[^\]]*\])?\s*([^""']*)[""']", RegexOptions.Compiled);
+    // [tool.poetry.dependencies] key = "version"
+    private static readonly Regex PoetryDepRegex = new(@"^\s*([a-zA-Z0-9_-]+)\s*=\s*[""']([^""']*)[""']", RegexOptions.Multiline);
+    // requirements.txt: package==1.0 or package>=1.0 etc.
+    private static readonly Regex ReqLineRegex = new(@"^\s*([a-zA-Z0-9_-]+)\s*([=<>!~]+.*)?$", RegexOptions.Compiled);
 
     public PythonCodebaseAnalyzer(ILogger<PythonCodebaseAnalyzer>? logger = null)
     {
@@ -119,10 +126,11 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
         var pyprojectPath = Path.Combine(projectDir, "pyproject.toml");
         var setupPath = Path.Combine(projectDir, "setup.py");
         string projectName = defaultName;
+        string? pyprojectContent = null;
         if (File.Exists(pyprojectPath))
         {
-            var content = await File.ReadAllTextAsync(pyprojectPath, cancellationToken);
-            var m = ProjectNameRegex.Match(content);
+            pyprojectContent = await File.ReadAllTextAsync(pyprojectPath, cancellationToken);
+            var m = ProjectNameRegex.Match(pyprojectContent);
             if (m.Success) projectName = m.Groups[1].Value.Trim();
         }
 
@@ -136,6 +144,15 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
             OutputType = "Library",
             RootNamespace = projectName
         };
+
+        if (pyprojectContent != null)
+            ParsePyProjectDependencies(pyprojectContent, projectInfo);
+        var reqPath = Path.Combine(projectDir, "requirements.txt");
+        if (File.Exists(reqPath))
+        {
+            var reqContent = await File.ReadAllTextAsync(reqPath, cancellationToken);
+            ParseRequirementsTxt(reqContent, projectInfo);
+        }
 
         var pyFiles = Directory.GetFiles(projectDir, "*.py", SearchOption.AllDirectories)
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "__pycache__" + Path.DirectorySeparatorChar)
@@ -175,6 +192,55 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
         if (projectInfo.Namespaces.Count == 0) projectInfo.Namespaces.Add("main");
         projectInfo.DetectedPatterns = projectInfo.Classes.Select(c => c.DetectedPattern).Where(p => !string.IsNullOrEmpty(p)).Cast<string>().Distinct().ToList();
         return projectInfo;
+    }
+
+    private static void ParsePyProjectDependencies(string pyprojectContent, ProjectInfo projectInfo)
+    {
+        // [project] dependencies = ["pkg>=1.0", "pkg2[extra]>=2.0"]
+        var depMatch = Regex.Match(pyprojectContent, @"\[\s*project\s*\][\s\S]*?dependencies\s*=\s*\[([^\]]*)\]", RegexOptions.Multiline);
+        if (depMatch.Success)
+        {
+            foreach (Match m in PyProjectDepLineRegex.Matches(depMatch.Groups[1].Value))
+            {
+                var name = m.Groups[1].Value.Trim();
+                var version = m.Groups[2].Value.Trim();
+                if (string.IsNullOrEmpty(name) || name.Equals("python", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!projectInfo.PackageReferences.Any(p => p.Name == name))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = name, Version = string.IsNullOrWhiteSpace(version) ? "" : version });
+            }
+        }
+        // [tool.poetry.dependencies] pkg = "version"
+        var poetryStart = pyprojectContent.IndexOf("[tool.poetry.dependencies]", StringComparison.OrdinalIgnoreCase);
+        if (poetryStart >= 0)
+        {
+            var rest = pyprojectContent.Substring(poetryStart);
+            var nextSection = Regex.Match(rest, @"\n\s*\[", RegexOptions.Multiline);
+            var section = nextSection.Success ? rest.Substring(0, nextSection.Index) : rest;
+            foreach (Match m in PoetryDepRegex.Matches(section))
+            {
+                var name = m.Groups[1].Value.Trim();
+                var version = m.Groups[2].Value.Trim();
+                if (string.IsNullOrEmpty(name) || name.Equals("python", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!projectInfo.PackageReferences.Any(p => p.Name == name))
+                    projectInfo.PackageReferences.Add(new PackageReference { Name = name, Version = string.IsNullOrWhiteSpace(version) ? "" : version });
+            }
+        }
+    }
+
+    private static void ParseRequirementsTxt(string content, ProjectInfo projectInfo)
+    {
+        foreach (var line in content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("#") || string.IsNullOrWhiteSpace(trimmed)) continue;
+            var m = ReqLineRegex.Match(trimmed);
+            if (!m.Success) continue;
+            var name = m.Groups[1].Value.Trim();
+            var versionSpec = m.Groups[2].Success ? m.Groups[2].Value.Trim() : null;
+            if (string.IsNullOrEmpty(name)) continue;
+            if (!projectInfo.PackageReferences.Any(p => p.Name == name))
+                projectInfo.PackageReferences.Add(new PackageReference { Name = name, Version = versionSpec ?? "" });
+        }
     }
 
     private static string? InferPythonPattern(string className, string content)
@@ -335,6 +401,10 @@ public class PythonCodebaseAnalyzer : ICodebaseAnalyzer
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"# Codebase: {analysis.CodebaseName}");
         sb.AppendLine("Language: Python | Conventions: snake_case (functions, modules), PascalCase not required for classes");
+        var packages = analysis.Projects.SelectMany(p => p.PackageReferences.Select(r => (r.Name, (string?)r.Version)));
+        var integrationsText = IntegrationCategorizer.BuildIntegrationsSection(packages);
+        if (!string.IsNullOrEmpty(integrationsText))
+            sb.AppendLine(integrationsText);
         sb.AppendLine();
         foreach (var project in context.ProjectDetails)
         {

@@ -487,9 +487,16 @@ export function StoryDetail() {
             )}
           </div>
 
-          {/* Change Type Buttons - Top Row */}
+          {/* Change Type – optional; only needed when targeting a specific file/class. Otherwise AI infers from story + codebase. */}
           <div className="mb-4">
-            <label className="block text-sm text-slate-400 mb-1">Change Type</label>
+            <label className="block text-sm text-slate-400 mb-1">
+              Change Type <span className="text-slate-500 font-normal">(optional – for targeting a specific file/class below)</span>
+            </label>
+            {!(targetProject || targetClass || targetFile) && (
+              <p className="text-xs text-slate-500 mb-2">
+                When you don’t set a target, the AI will decide from your story and codebase whether to create, modify, or remove code.
+              </p>
+            )}
             <div className="flex gap-2">
               {[ChangeType.Create, ChangeType.Modify, ChangeType.Delete].map(type => (
                 <button
