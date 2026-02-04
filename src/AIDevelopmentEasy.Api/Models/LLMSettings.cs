@@ -60,6 +60,7 @@ public class LLMCallResult
     public TimeSpan Duration { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }
+    public DateTime Timestamp { get; set; }
 }
 
 /// <summary>
@@ -75,7 +76,7 @@ public static class TokenEstimator
     public static int EstimateTokens(string text)
     {
         if (string.IsNullOrEmpty(text)) return 0;
-        
+
         // Use a conservative estimate: 1 token per 3.5 characters
         return (int)Math.Ceiling(text.Length / 3.5);
     }

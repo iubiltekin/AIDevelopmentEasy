@@ -1,11 +1,12 @@
 import { Check, Clock, Loader2, AlertCircle, SkipForward, TestTube, GitPullRequest, RefreshCw, AlertTriangle, Wrench, Code } from 'lucide-react';
-import { 
-  PipelineStatusDto, 
-  PhaseState, 
+import {
+  PipelineStatusDto,
+  PhaseState,
   PipelinePhase,
   RetryAction,
   FixTaskDto,
   TestSummaryDto,
+  LLMCallResultDto,
   getPhaseLabel,
   getPhaseAgent,
   getRetryReasonLabel,
@@ -18,6 +19,32 @@ interface PipelineStatusProps {
   onApprove: (phase: PipelinePhase) => void;
   onReject: (phase: PipelinePhase) => void;
   onApproveRetry?: (action: RetryAction) => void;
+}
+
+// Component to display LLM calls summary for the current phase
+function LLMCallsSummaryBlock({ calls }: { calls: LLMCallResultDto[] }) {
+  const totalTokens = calls.reduce((s, c) => s + c.totalTokens, 0);
+  const totalCost = calls.reduce((s, c) => s + (c.actualCostUSD ?? 0), 0);
+  return (
+    <div className="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+      <div className="space-y-1.5 text-xs">
+        {calls.map((c, i) => (
+          <div key={i} className="flex justify-between gap-4 text-slate-300">
+            <span className="font-medium text-amber-300/90">{c.agentName}</span>
+            <span>{c.totalTokens.toLocaleString()} token</span>
+            <span>${(c.actualCostUSD ?? 0).toFixed(4)}</span>
+            <span>{typeof c.duration === 'string' ? c.duration : '-'}</span>
+          </div>
+        ))}
+        <div className="border-t border-slate-600 pt-1.5 mt-1.5 flex justify-between gap-4 text-slate-400 font-medium">
+          <span>Toplam ({calls.length} istek)</span>
+          <span>{totalTokens.toLocaleString()} token</span>
+          <span>${totalCost.toFixed(4)}</span>
+          <span>-</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Component to safely display phase result data
@@ -73,7 +100,7 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
 
   // Calculate progress
   const isCompleted = status.currentPhase === PipelinePhase.Completed;
-  const completedCount = status.phases.filter(p => 
+  const completedCount = status.phases.filter(p =>
     p.state === PhaseState.Completed || p.state === PhaseState.Skipped
   ).length;
   // For progress line: calculate based on completed phases, ensure 100% when all done
@@ -86,26 +113,24 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
         {/* Background line */}
         <div className="absolute top-7 left-5 right-5 h-0.5 bg-slate-700" />
         {/* Progress line */}
-        <div 
-          className={`absolute top-7 left-5 h-0.5 transition-all duration-500 ${
-            isCompleted ? 'bg-emerald-500' : 'bg-blue-500'
-          }`}
+        <div
+          className={`absolute top-7 left-5 h-0.5 transition-all duration-500 ${isCompleted ? 'bg-emerald-500' : 'bg-blue-500'
+            }`}
           style={{ width: `calc(${progressPercent}% - 20px)` }}
         />
-        
+
         <div className="relative flex justify-between">
           {status.phases.map((phase, index) => (
             <div key={phase.phase} className="flex flex-col items-center" style={{ animationDelay: `${index * 100}ms` }}>
-              <div 
-                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
-                  phase.state === PhaseState.Completed ? 'bg-emerald-500/20 ring-2 ring-emerald-500' :
-                  phase.state === PhaseState.Running ? 'bg-blue-500/20 ring-2 ring-blue-500 animate-pulse-glow' :
-                  phase.state === PhaseState.WaitingApproval ? 'bg-amber-500/20 ring-2 ring-amber-500' :
-                  phase.state === PhaseState.WaitingRetryApproval ? 'bg-orange-500/20 ring-2 ring-orange-500 animate-pulse' :
-                  phase.state === PhaseState.Failed ? 'bg-red-500/20 ring-2 ring-red-500' :
-                  phase.state === PhaseState.Skipped ? 'bg-slate-600/50 ring-2 ring-slate-600' :
-                  'bg-slate-800'
-                }`}
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${phase.state === PhaseState.Completed ? 'bg-emerald-500/20 ring-2 ring-emerald-500' :
+                    phase.state === PhaseState.Running ? 'bg-blue-500/20 ring-2 ring-blue-500 animate-pulse-glow' :
+                      phase.state === PhaseState.WaitingApproval ? 'bg-amber-500/20 ring-2 ring-amber-500' :
+                        phase.state === PhaseState.WaitingRetryApproval ? 'bg-orange-500/20 ring-2 ring-orange-500 animate-pulse' :
+                          phase.state === PhaseState.Failed ? 'bg-red-500/20 ring-2 ring-red-500' :
+                            phase.state === PhaseState.Skipped ? 'bg-slate-600/50 ring-2 ring-slate-600' :
+                              'bg-slate-800'
+                  }`}
               >
                 {getPhaseIcon(phase.state, phase.phase)}
               </div>
@@ -115,14 +140,13 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
               <span className="text-[10px] text-slate-500">
                 {getPhaseAgent(phase.phase) || ''}
               </span>
-              <span className={`text-xs ${
-                phase.state === PhaseState.Completed ? 'text-emerald-400' :
-                phase.state === PhaseState.Running ? 'text-blue-400' :
-                phase.state === PhaseState.WaitingApproval ? 'text-amber-400' :
-                phase.state === PhaseState.WaitingRetryApproval ? 'text-orange-400' :
-                phase.state === PhaseState.Failed ? 'text-red-400' :
-                'text-slate-500'
-              }`}>
+              <span className={`text-xs ${phase.state === PhaseState.Completed ? 'text-emerald-400' :
+                  phase.state === PhaseState.Running ? 'text-blue-400' :
+                    phase.state === PhaseState.WaitingApproval ? 'text-amber-400' :
+                      phase.state === PhaseState.WaitingRetryApproval ? 'text-orange-400' :
+                        phase.state === PhaseState.Failed ? 'text-red-400' :
+                          'text-slate-500'
+                }`}>
                 {getPhaseStateLabel(phase.state)}
               </span>
             </div>
@@ -141,15 +165,15 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
       {!isCompleted && status.phases
         .filter(phase => phase.state === PhaseState.WaitingApproval)
         .map(phase => (
-          <div 
+          <div
             key={`approval-${phase.phase}`}
             className="mt-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl animate-slide-in"
           >
             <div className="flex items-center gap-2 mb-2">
               <span className="text-amber-400">{getPhaseTypeIcon(phase.phase)}</span>
               <h3 className="text-lg font-semibold text-amber-400">
-                {phase.phase === PipelinePhase.PullRequest 
-                  ? 'Deployment Successful - Create PR?' 
+                {phase.phase === PipelinePhase.PullRequest
+                  ? 'Deployment Successful - Create PR?'
                   : `${getPhaseLabel(phase.phase)} Complete - Waiting for Approval`}
               </h3>
             </div>
@@ -159,12 +183,18 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
             {phase.message && (
               <p className="text-slate-300 mb-4">{phase.message}</p>
             )}
+            {phase.llmCallsSummary && phase.llmCallsSummary.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-slate-400 mb-2">LLM özeti (bu aşamada yapılan istekler)</h4>
+                <LLMCallsSummaryBlock calls={phase.llmCallsSummary} />
+              </div>
+            )}
             {phase.result != null && (
               <div className="mb-4">
                 <PhaseResultPreview result={phase.result} />
               </div>
             )}
-            
+
             {/* Special UI for PullRequest phase */}
             {phase.phase === PipelinePhase.PullRequest ? (
               <div className="space-y-3">
@@ -252,7 +282,7 @@ export function PipelineStatus({ status, onApprove, onReject, onApproveRetry }: 
 
       {/* Retry Panel */}
       {status.retryInfo && onApproveRetry && (
-        <RetryPanel 
+        <RetryPanel
           retryInfo={status.retryInfo}
           onApproveRetry={onApproveRetry}
         />
@@ -295,7 +325,7 @@ function RetryPanel({ retryInfo, onApproveRetry }: RetryPanelProps) {
             <span className="font-semibold">⚠️ BREAKING CHANGE DETECTED!</span>
           </div>
           <p className="mt-1 text-sm text-red-300">
-            {retryInfo.testSummary?.existingTestsFailed} existing test(s) are now failing. 
+            {retryInfo.testSummary?.existingTestsFailed} existing test(s) are now failing.
             The changes may have broken existing functionality.
           </p>
         </div>

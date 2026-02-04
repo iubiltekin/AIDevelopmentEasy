@@ -11,6 +11,7 @@ using AIDevelopmentEasy.Core.Models;
 // Use Api.Models.PipelinePhase to avoid ambiguity with Core.Agents.Base.PipelinePhase
 using PipelinePhase = AIDevelopmentEasy.Api.Models.PipelinePhase;
 using CorePipelinePhase = AIDevelopmentEasy.Core.Agents.Base.PipelinePhase;
+using CoreLLMCallInfo = AIDevelopmentEasy.Core.Agents.Base.LLMCallInfo;
 
 namespace AIDevelopmentEasy.Api.Services;
 
@@ -50,6 +51,10 @@ public class PipelineService : IPipelineService
 
     // Track completed pipelines for status retrieval (keeps last N completed for memory efficiency)
     private static readonly ConcurrentDictionary<string, PipelineStatusDto> _completedPipelines = new();
+
+    // LLM call callback for pipeline: when an LLM call completes, we add to current execution and notify
+    private static Action<LLMCallResult>? _currentPipelineLLMCallback;
+    private static readonly object _callbackLock = new();
 
     public PipelineService(
         IStoryRepository storyRepository,
@@ -296,6 +301,7 @@ public class PipelineService : IPipelineService
     {
         var storyId = execution.StoryId;
         var ct = execution.CancellationTokenSource.Token;
+        SetPipelineLLMCallback(execution);
 
         try
         {
@@ -1086,6 +1092,10 @@ public class PipelineService : IPipelineService
                 };
 
                 prPhaseStatus.Result = prInfo;
+                prPhaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
+                    ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
+                    : null;
+                execution.LLMCallsSinceLastApproval.Clear();
 
                 await _notificationService.NotifyPhasePendingApprovalAsync(
                     storyId,
@@ -1169,6 +1179,7 @@ public class PipelineService : IPipelineService
         }
         finally
         {
+            ClearPipelineLLMCallback();
             execution.Status.IsRunning = false;
             _runningPipelines.TryRemove(storyId, out _);
             await _notificationService.NotifyStoryListChangedAsync();
@@ -1193,6 +1204,10 @@ public class PipelineService : IPipelineService
             var result = await action();
 
             phaseStatus.Result = result;
+            phaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
+                ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
+                : null;
+            execution.LLMCallsSinceLastApproval.Clear();
             phaseStatus.State = PhaseState.WaitingApproval;
 
             await _notificationService.NotifyPhasePendingApprovalAsync(
@@ -1339,6 +1354,9 @@ public class PipelineService : IPipelineService
 
         // Target info from story (for limiting scope)
         public TargetInfo? TargetInfo { get; set; }
+
+        // LLM calls since last approval (cleared when phase goes to WaitingApproval)
+        public List<LLMCallResult> LLMCallsSinceLastApproval { get; set; } = new();
     }
 
     /// <summary>
@@ -2260,6 +2278,10 @@ namespace {namespaceName}
                 testResults.Failed,
                 NewTestsPassed = testResults.NewTestsPassed
             };
+            phaseStatus.LlmCallsSummary = execution.LLMCallsSinceLastApproval.Count > 0
+                ? new List<LLMCallResult>(execution.LLMCallsSinceLastApproval)
+                : null;
+            execution.LLMCallsSinceLastApproval.Clear();
 
             await _notificationService.NotifyPhasePendingApprovalAsync(storyId, PipelinePhase.UnitTesting,
                 $"Integration tests passed! {testResults.Passed}/{testResults.TotalTests}", phaseStatus.Result);
@@ -3301,8 +3323,54 @@ Analyze the test failure and determine:
                 Message = p.Message,
                 StartedAt = p.StartedAt,
                 CompletedAt = p.CompletedAt,
-                Result = p.Result
+                Result = p.Result,
+                LlmCallsSummary = p.LlmCallsSummary
             }).ToList()
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Pipeline LLM callback (called from Program.cs when BaseAgent completes an LLM call)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    internal static void InvokePipelineLLMCallback(LLMCallResult result)
+    {
+        lock (_callbackLock)
+        {
+            _currentPipelineLLMCallback?.Invoke(result);
+        }
+    }
+
+    internal static LLMCallResult FromCoreInfo(CoreLLMCallInfo info) => new LLMCallResult
+    {
+        AgentName = info.AgentName,
+        PromptTokens = info.PromptTokens,
+        CompletionTokens = info.CompletionTokens,
+        TotalTokens = info.TotalTokens,
+        ActualCostUSD = info.ActualCostUSD,
+        Duration = info.Duration,
+        Success = true,
+        Timestamp = info.Timestamp
+    };
+
+    private void SetPipelineLLMCallback(PipelineExecution execution)
+    {
+        var cb = (LLMCallResult result) =>
+        {
+            execution.LLMCallsSinceLastApproval.Add(result);
+            _notificationService.NotifyLLMCallCompletedAsync(execution.StoryId, result);
+        };
+        lock (_callbackLock)
+        {
+            _currentPipelineLLMCallback = cb;
+        }
+    }
+
+    private void ClearPipelineLLMCallback()
+    {
+        lock (_callbackLock)
+        {
+            _currentPipelineLLMCallback = null;
+        }
     }
 }

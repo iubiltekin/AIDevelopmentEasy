@@ -180,6 +180,8 @@ public class PhaseStatusDto
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public object? Result { get; set; }
+    /// <summary>LLM calls made during this phase (since last approval).</summary>
+    public List<LLMCallResult>? LlmCallsSummary { get; set; }
 }
 
 /// <summary>

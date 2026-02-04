@@ -17,6 +17,13 @@ Please analyze the following requirement and create a development plan that inte
 5. Each task MUST specify the target project, files, namespace, and modification_type (create or modify)
 6. Each target_file MUST use the file extension for that project from the "Languages and file extensions" section (e.g. Go project → .go, TypeScript/React → .tsx, not .py unless the project language is Python)
 
+## CRITICAL: Only use paths from the codebase context
+
+- **target_files** may ONLY contain paths that appear in the codebase context above (under "Main Projects", "Folder Structure (real paths)", or "Test Projects"). Use the exact path style (relative to project or repo) shown there.
+- For **modify** tasks: the file must be one of the existing files or paths listed in the context. If a file is not listed, do not include it as a target.
+- Do NOT invent or guess paths (e.g. content/models/platform.go, web/src/components/Platform/...). If the context does not show a project or folder, do not create target_files for it.
+- Only create tasks for projects and files that are actually present in the codebase context.
+
 ## CRITICAL: modification_type
 
 - For each task set "modification_type": "create" (new file) or "modify" (existing file), based on the requirement and codebase context

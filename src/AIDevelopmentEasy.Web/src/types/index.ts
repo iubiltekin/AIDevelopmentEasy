@@ -108,6 +108,20 @@ export interface UpdateStoryTargetRequest {
   targetTestClass?: string;
 }
 
+/** Single LLM call result (tokens, cost, duration) */
+export interface LLMCallResultDto {
+  agentName: string;
+  phase?: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  actualCostUSD: number;
+  duration: string; // TimeSpan as string from API
+  success?: boolean;
+  error?: string;
+  timestamp?: string;
+}
+
 export interface PhaseStatusDto {
   phase: PipelinePhase;
   state: PhaseState;
@@ -115,6 +129,8 @@ export interface PhaseStatusDto {
   startedAt?: string;
   completedAt?: string;
   result?: unknown;
+  /** LLM calls made during this phase (since last approval) */
+  llmCallsSummary?: LLMCallResultDto[];
 }
 
 export interface PipelineStatusDto {

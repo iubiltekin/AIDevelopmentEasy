@@ -44,6 +44,13 @@ You must decide **per task** whether the task **creates** new file(s), **modifie
 5. **Namespace/Package/Module**: Match the project's convention (from context)
 6. **Tests**: Place in the test project/path from context, with the same extension style as that project
 
+## CRITICAL: Do not invent paths
+
+- **target_files** MUST only use paths that appear in the codebase context (Main Projects → Path, Folder Structure (real paths), or paths clearly under a project’s Path).
+- For **modification_type "modify"**: the file MUST be an existing path shown in the context. If the context does not list that file or folder, do NOT add it.
+- Do NOT guess paths (e.g. "content/models/platform.go", "web/src/components/...") unless they appear in the context. If a project or folder is not in the context, do not create target_files for it.
+- Only output tasks for projects and folders that are actually listed in the codebase context.
+
 ## Output Format (JSON)
 
 **Every task MUST include a `namespace` field** (or package/module as appropriate for the project language in context). Use the codebase context to see the correct pattern.

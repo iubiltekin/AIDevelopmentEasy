@@ -26,6 +26,10 @@ export function LogViewer({ logs, className = '' }: LogViewerProps) {
         return 'text-emerald-400';
       case 'info':
         return 'text-blue-400';
+      case 'llmcallstarting':
+        return 'text-cyan-400';
+      case 'llmcallcompleted':
+        return 'text-emerald-400';
       default:
         return 'text-slate-300';
     }
@@ -40,7 +44,7 @@ export function LogViewer({ logs, className = '' }: LogViewerProps) {
   };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`bg-slate-900 rounded-xl border border-slate-700 p-4 font-mono text-sm overflow-y-auto ${className}`}
     >
@@ -48,7 +52,7 @@ export function LogViewer({ logs, className = '' }: LogViewerProps) {
         <div className="text-slate-500 italic">Waiting for logs...</div>
       ) : (
         logs.map((log, index) => (
-          <div 
+          <div
             key={index}
             className="py-1 animate-slide-in"
             style={{ animationDelay: `${index * 50}ms` }}

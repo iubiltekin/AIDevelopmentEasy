@@ -116,16 +116,15 @@ public class LLMUsageTracker
     private DateTime _sessionStart = DateTime.UtcNow;
     private readonly List<LLMCallResult> _recentCalls = new();
 
-    private LLMUsageTracker() 
+    private LLMUsageTracker()
     {
-        // Register callback with BaseAgent to receive LLM call stats
-        BaseAgent.OnLLMCallCompleted = OnLLMCallCompleted;
+        // Callback is registered in Program.cs to also support pipeline LLM tracking
     }
 
     /// <summary>
-    /// Callback handler for LLM calls from BaseAgent
+    /// Record an LLM call from BaseAgent (called by the global callback in Program.cs).
     /// </summary>
-    private void OnLLMCallCompleted(CoreLLMCallInfo info)
+    public void RecordFromCore(CoreLLMCallInfo info)
     {
         var result = new LLMCallResult
         {

@@ -610,31 +610,24 @@ public class CodeAnalysisAgent
                 sb.AppendLine($"  - Patterns: {string.Join(", ", proj.DetectedPatterns)}");
             }
 
-            // Show folder structure with ACTUAL file paths (so planner sees real extensions: .go, .tsx, etc.)
-            var folderGroups = proj.Classes
+            // Files and types: every file path with the types/classes it contains (generic, no hardcoded categories)
+            const int maxFilesPerProject = 250;
+            var filesWithTypes = proj.Classes
                 .Where(c => !string.IsNullOrEmpty(c.FilePath))
-                .GroupBy(c => Path.GetDirectoryName(c.FilePath)?.Replace("\\", "/") ?? "")
-                .Where(g => !string.IsNullOrEmpty(g.Key))
+                .GroupBy(c => (c.FilePath ?? "").Replace("\\", "/"))
                 .OrderBy(g => g.Key)
-                .Take(10)
+                .Take(maxFilesPerProject)
                 .ToList();
-
-            if (folderGroups.Any())
+            if (filesWithTypes.Any())
             {
-                sb.AppendLine($"  - Folder Structure (real paths):");
-                foreach (var folder in folderGroups)
+                sb.AppendLine($"  - Files and types (target_files must be from this list; types in each file):");
+                foreach (var g in filesWithTypes)
                 {
-                    var folderName = folder.Key;
-                    sb.AppendLine($"    - {folderName}/");
-                    foreach (var cls in folder.Take(3))
-                    {
-                        sb.AppendLine($"      - {cls.FilePath} (namespace/package: {cls.Namespace})");
-                    }
-                    if (folder.Count() > 3)
-                    {
-                        sb.AppendLine($"      - ... and {folder.Count() - 3} more");
-                    }
+                    var types = g.Select(c => c.Name).Where(n => !string.IsNullOrEmpty(n)).Distinct().Take(8);
+                    sb.AppendLine($"    - {g.Key} ({string.Join(", ", types)})");
                 }
+                if (proj.Classes.Select(c => (c.FilePath ?? "").Replace("\\", "/")).Distinct().Count() > maxFilesPerProject)
+                    sb.AppendLine($"    - ... and more files (total {proj.Classes.Count} types in project)");
             }
 
             // List key interfaces with paths

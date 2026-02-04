@@ -7,6 +7,7 @@ using AIDevelopmentEasy.Api.Repositories.Interfaces;
 using AIDevelopmentEasy.Api.Services;
 using AIDevelopmentEasy.Api.Services.Interfaces;
 using AIDevelopmentEasy.Core.Agents;
+using AIDevelopmentEasy.Core.Agents.Base;
 using AIDevelopmentEasy.Core.Services;
 using Microsoft.Extensions.FileProviders;
 using Serilog;
@@ -264,8 +265,13 @@ Log.Information("  API: /swagger");
 Log.Information("  Web UI: / (if wwwroot exists)");
 Log.Information("════════════════════════════════════════════════════════════");
 
-// Initialize LLM usage tracker (registers callback with BaseAgent)
+// Initialize LLM usage tracker and register single callback: track usage + pipeline LLM summary
 _ = LLMUsageTracker.Instance;
+BaseAgent.OnLLMCallCompleted = (info) =>
+{
+    LLMUsageTracker.Instance.RecordFromCore(info);
+    PipelineService.InvokePipelineLLMCallback(PipelineService.FromCoreInfo(info));
+};
 Log.Information("  LLM Usage Tracker: Initialized");
 
 app.Run();
