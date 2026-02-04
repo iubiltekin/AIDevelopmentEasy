@@ -9,5 +9,5 @@ When this codebase uses Python:
 - **Types**: Prefer type hints when the codebase uses them. Use `typing` or `from __future__ import annotations` as in context.
 - **Dependencies**: Do not add new top-level dependencies unless the requirement asks for it. Use stdlib or existing dependencies from context.
 - **Async**: Use `async def` / `await` only if the project already uses asyncio. Match existing async style.
-- **Tests**: Place tests in `tests/` or alongside code (e.g. `test_*.py`, `*_test.py`) as in context. Use the project’s test framework (pytest, unittest, etc.).
+- **Tests**: Place tests in `tests/` or alongside code (e.g. `test_*.py`, `*_test.py`) as in context. Use the project's test framework (pytest, unittest, etc.).
 - **Namespace**: Use the package/module path (e.g. `app.services.auth`) as in the codebase context. For standalone scripts, a simple module name is enough.

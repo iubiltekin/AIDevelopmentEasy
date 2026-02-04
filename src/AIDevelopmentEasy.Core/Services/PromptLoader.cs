@@ -55,6 +55,7 @@ public class PromptLoader
 
     /// <summary>
     /// Load a prompt by name (without extension). Throws if file does not exist (no fallback).
+    /// Coder and coder-modification prompts are loaded from the prompts/coder/ subfolder.
     /// </summary>
     /// <param name="promptName">Name of the prompt file (e.g., "planner", "coder-csharp")</param>
     /// <returns>The prompt content</returns>
@@ -64,9 +65,7 @@ public class PromptLoader
         if (_promptCache.TryGetValue(promptName, out var cached))
             return cached;
 
-        var filePath = Path.Combine(_promptsDirectory, $"{promptName}.md");
-        if (!File.Exists(filePath))
-            filePath = Path.Combine(_promptsDirectory, promptName);
+        var filePath = GetPromptFilePath(promptName);
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Prompt file not found: {promptName}.md in {_promptsDirectory}");
 
@@ -74,6 +73,32 @@ public class PromptLoader
         content = RemoveMarkdownTitle(content);
         _promptCache[promptName] = content;
         return content;
+    }
+
+    /// <summary>
+    /// Resolves the path for a prompt file. Prompts are grouped in subfolders: coder/, debugger/, planner/, requirement/, reviewer/.
+    /// </summary>
+    private string GetPromptFilePath(string promptName)
+    {
+        var category = GetPromptCategory(promptName);
+        if (category != null)
+        {
+            var inCategory = Path.Combine(_promptsDirectory, category, $"{promptName}.md");
+            if (File.Exists(inCategory))
+                return inCategory;
+        }
+
+        return Path.Combine(_promptsDirectory, $"{promptName}.md");
+    }
+
+    private static string? GetPromptCategory(string promptName)
+    {
+        if (promptName.StartsWith("coder", StringComparison.OrdinalIgnoreCase)) return "coder";
+        if (promptName.StartsWith("debugger", StringComparison.OrdinalIgnoreCase)) return "debugger";
+        if (promptName.StartsWith("planner", StringComparison.OrdinalIgnoreCase)) return "planner";
+        if (promptName.StartsWith("requirement", StringComparison.OrdinalIgnoreCase)) return "requirement";
+        if (promptName.StartsWith("reviewer", StringComparison.OrdinalIgnoreCase)) return "reviewer";
+        return null;
     }
 
     /// <summary>
@@ -108,7 +133,7 @@ public class PromptLoader
     /// </summary>
     public bool PromptExists(string promptName)
     {
-        var filePath = Path.Combine(_promptsDirectory, $"{promptName}.md");
+        var filePath = GetPromptFilePath(promptName);
         return File.Exists(filePath);
     }
 
