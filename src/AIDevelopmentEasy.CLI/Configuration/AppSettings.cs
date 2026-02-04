@@ -71,9 +71,7 @@ public class ResolvedPaths
         Directory.CreateDirectory(PromptsPath);
         Directory.CreateDirectory(CodebasesPath);
 
-        // Copy default prompts from app directory if prompts directory is empty
-        CopyDefaultPromptsIfNeeded();
-
+        // Prompts: only in repo (prompts\). build-service.ps1 copies them to ProgramData when run.
         // Initialize PromptLoader with correct prompts directory
         PromptLoader.Initialize(PromptsPath);
     }
@@ -83,22 +81,6 @@ public class ResolvedPaths
         if (File.Exists(CodingStandardsPath))
         {
             CodingStandards = await File.ReadAllTextAsync(CodingStandardsPath);
-        }
-    }
-
-    private void CopyDefaultPromptsIfNeeded()
-    {
-        var appPromptsDir = Path.Combine(AppContext.BaseDirectory, "prompts");
-        if (Directory.Exists(appPromptsDir) && !Directory.EnumerateFiles(PromptsPath, "*.md").Any())
-        {
-            foreach (var file in Directory.GetFiles(appPromptsDir, "*.md"))
-            {
-                var destFile = Path.Combine(PromptsPath, Path.GetFileName(file));
-                if (!File.Exists(destFile))
-                {
-                    File.Copy(file, destFile);
-                }
-            }
         }
     }
 

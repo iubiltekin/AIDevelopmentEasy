@@ -83,9 +83,7 @@ Directory.CreateDirectory(codebasesPath);
 Directory.CreateDirectory(requirementsPath);
 Directory.CreateDirectory(knowledgeBasePath);
 
-// Copy default prompts if prompts directory is empty
-CopyDefaultPromptsIfNeeded(promptsPath);
-
+// Prompts: only in repo (prompts\). build-service.ps1 copies them to ProgramData when run.
 // Initialize PromptLoader
 PromptLoader.Initialize(promptsPath);
 
@@ -275,64 +273,6 @@ app.Run();
 // ════════════════════════════════════════════════════════════════════════════
 // Helper Methods
 // ════════════════════════════════════════════════════════════════════════════
-
-/// <summary>
-/// Copy default prompts to ProgramData if prompts directory is empty.
-/// Tries multiple source locations in order of priority.
-/// </summary>
-static void CopyDefaultPromptsIfNeeded(string promptsPath)
-{
-    // Skip if prompts already exist
-    if (Directory.EnumerateFiles(promptsPath, "*.md").Any())
-        return;
-
-    // Try sources in priority order:
-    // 1. Application directory (deployed scenario)
-    // 2. Solution directory (development scenario)
-    var possibleSources = new[]
-    {
-        Path.Combine(AppContext.BaseDirectory, "prompts"),
-        FindSolutionPromptsPath()
-    };
-
-    foreach (var sourcePath in possibleSources.Where(p => p != null && Directory.Exists(p)))
-    {
-        var promptFiles = Directory.GetFiles(sourcePath!, "*.md");
-        if (promptFiles.Length > 0)
-        {
-            foreach (var file in promptFiles)
-            {
-                var destFile = Path.Combine(promptsPath, Path.GetFileName(file));
-                if (!File.Exists(destFile))
-                {
-                    File.Copy(file, destFile);
-                    Log.Information("Copied default prompt: {FileName}", Path.GetFileName(file));
-                }
-            }
-            Log.Information("Copied {Count} default prompts from {Source}", promptFiles.Length, sourcePath);
-            return;
-        }
-    }
-}
-
-/// <summary>
-/// Find prompts directory in solution (for development mode)
-/// </summary>
-static string? FindSolutionPromptsPath()
-{
-    var dir = new DirectoryInfo(AppContext.BaseDirectory);
-    while (dir != null)
-    {
-        if (dir.GetFiles("*.sln").Length > 0)
-        {
-            var promptsPath = Path.Combine(dir.FullName, "prompts");
-            if (Directory.Exists(promptsPath))
-                return promptsPath;
-        }
-        dir = dir.Parent;
-    }
-    return null;
-}
 
 /// <summary>
 /// Helper class for Windows Service detection

@@ -150,13 +150,7 @@ mkdir "%DATA_DIR%\logs" 2>nul
 
 :: Note: Prompts are managed via build-service.ps1 directly to ProgramData
 :: If prompts folder exists in install dir (legacy), copy it
-if exist "%~dp0prompts" (
-    xcopy /s /y /i "%~dp0prompts" "%DATA_DIR%\prompts\"
-) else (
-    echo Note: Prompts should be copied via build-service.ps1
-)
-
-:: Copy appsettings if they exist
+:: Prompts: only build-service.ps1 copies from repo\prompts to ProgramData. Do not copy from install dir.
 if exist "%~dp0appsettings.json" (
     copy /y "%~dp0appsettings.json" "%DATA_DIR%\appsettings.json"
 )
@@ -253,5 +247,7 @@ Write-Host ""
 Write-Host "  Next Steps:" -ForegroundColor Yellow
 Write-Host "    1. Copy appsettings.Local.json with your API keys" -ForegroundColor White
 Write-Host "    2. Run install-service.cmd as Administrator" -ForegroundColor White
+Write-Host "    3. Open http://localhost:5000" -ForegroundColor White
+Write-Host ""
 Write-Host "    3. Open http://localhost:5000" -ForegroundColor White
 Write-Host ""
