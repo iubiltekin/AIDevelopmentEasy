@@ -49,17 +49,9 @@ public class CoderAgent : BaseAgent
         }
 
         // For non-C# languages, use generic prompt with variable substitution
-        try
-        {
-            return Services.PromptLoader.Instance.LoadPrompt(
-                "coder-generic",
-                new Dictionary<string, string> { ["LANGUAGE"] = _targetLanguage },
-                GetFallbackPrompt());
-        }
-        catch
-        {
-            return GetFallbackPrompt();
-        }
+        return Services.PromptLoader.Instance.LoadPromptRequired(
+            "coder-generic",
+            new Dictionary<string, string> { ["LANGUAGE"] = _targetLanguage });
     }
 
     protected override string GetFallbackPrompt()
@@ -174,12 +166,12 @@ IMPORTANT: Output ONLY code in a single code block. No explanations before or af
     {
         // Check if this is a modification task
         var isModification = request.Context.TryGetValue("is_modification", out var isMod) && isMod == "true";
-        
+
         if (isModification)
         {
             return await RunModificationAsync(request, cancellationToken);
         }
-        
+
         return await RunGenerationAsync(request, cancellationToken);
     }
 
@@ -347,7 +339,7 @@ Output the code in a markdown code block.";
                 request.ProjectState.Codebase[targetFile] = modifiedCode;
             }
 
-            LogAction(request.ProjectState, "CodeModification", request.Input, 
+            LogAction(request.ProjectState, "CodeModification", request.Input,
                 $"Modified {targetFile}: {currentContent.Split('\n').Length} -> {modifiedCode.Split('\n').Length} lines");
 
             _logger?.LogInformation("[Coder] Modified {File}: {OrigLines} -> {NewLines} lines",

@@ -691,6 +691,15 @@ public class CodeAnalysisAgent
             }
         }
 
+        // Detect database migrator (e.g. scripts/migrator + psqlmigrations) so planner can load planner-migrator rules
+        var migratorInfo = DetectMigratorAndMigrationsPath(analysis.CodebasePath);
+        if (migratorInfo != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Database migrations (migrator):");
+            sb.AppendLine($"- migrator: {migratorInfo.Value.MigratorPath}, migration_path: {migratorInfo.Value.MigrationsDirName}");
+        }
+
         sb.AppendLine();
         sb.AppendLine("### Conventions:");
         sb.AppendLine($"- Private fields: {analysis.Conventions.PrivateFieldPrefix}fieldName");
@@ -709,5 +718,41 @@ public class CodeAnalysisAgent
         sb.AppendLine("- Follow existing namespace/package/module conventions in each project");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Detects a database migrator app and its migrations directory (e.g. scripts/migrator + psqlmigrations)
+    /// so the planner can load planner-migrator rules. Returns null if not found.
+    /// </summary>
+    private static (string MigratorPath, string MigrationsDirName)? DetectMigratorAndMigrationsPath(string codebasePath)
+    {
+        if (string.IsNullOrEmpty(codebasePath) || !Directory.Exists(codebasePath))
+            return null;
+
+        var migrationDirNames = new[] { "psqlmigrations", "migrations" };
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(codebasePath, "*", SearchOption.AllDirectories))
+            {
+                var dirName = Path.GetFileName(dir);
+                if (!dirName.Contains("migrator", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                foreach (var migrationDir in migrationDirNames)
+                {
+                    var migrationPath = Path.Combine(dir, migrationDir);
+                    if (Directory.Exists(migrationPath))
+                    {
+                        var relativeMigrator = Path.GetRelativePath(codebasePath, dir).Replace('\\', '/');
+                        return (relativeMigrator, migrationDir);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore access or path errors
+        }
+
+        return null;
     }
 }

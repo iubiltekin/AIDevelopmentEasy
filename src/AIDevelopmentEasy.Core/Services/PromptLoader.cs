@@ -46,7 +46,7 @@ public class PromptLoader
     private PromptLoader(string promptsDirectory)
     {
         _promptsDirectory = promptsDirectory;
-        
+
         if (!Directory.Exists(_promptsDirectory))
         {
             Directory.CreateDirectory(_promptsDirectory);
@@ -54,68 +54,46 @@ public class PromptLoader
     }
 
     /// <summary>
-    /// Load a prompt by name (without extension)
+    /// Load a prompt by name (without extension). Throws if file does not exist (no fallback).
     /// </summary>
     /// <param name="promptName">Name of the prompt file (e.g., "planner", "coder-csharp")</param>
-    /// <param name="fallbackPrompt">Fallback prompt if file doesn't exist</param>
     /// <returns>The prompt content</returns>
-    public string LoadPrompt(string promptName, string? fallbackPrompt = null)
+    /// <exception cref="FileNotFoundException">When the prompt file is missing</exception>
+    public string LoadPromptRequired(string promptName)
     {
-        // Check cache first
         if (_promptCache.TryGetValue(promptName, out var cached))
-        {
             return cached;
-        }
 
         var filePath = Path.Combine(_promptsDirectory, $"{promptName}.md");
-        
-        if (File.Exists(filePath))
-        {
-            var content = File.ReadAllText(filePath);
-            // Remove markdown title if present (# Title line)
-            content = RemoveMarkdownTitle(content);
-            _promptCache[promptName] = content;
-            return content;
-        }
+        if (!File.Exists(filePath))
+            filePath = Path.Combine(_promptsDirectory, promptName);
+        if (!File.Exists(filePath))
+            throw new FileNotFoundException($"Prompt file not found: {promptName}.md in {_promptsDirectory}");
 
-        // Try without extension
-        filePath = Path.Combine(_promptsDirectory, promptName);
-        if (File.Exists(filePath))
-        {
-            var content = File.ReadAllText(filePath);
-            content = RemoveMarkdownTitle(content);
-            _promptCache[promptName] = content;
-            return content;
-        }
-
-        // Use fallback
-        if (fallbackPrompt != null)
-        {
-            _promptCache[promptName] = fallbackPrompt;
-            return fallbackPrompt;
-        }
-
-        throw new FileNotFoundException($"Prompt file not found: {promptName}.md in {_promptsDirectory}");
+        var content = File.ReadAllText(filePath);
+        content = RemoveMarkdownTitle(content);
+        _promptCache[promptName] = content;
+        return content;
     }
 
     /// <summary>
-    /// Load a prompt with variable substitution
+    /// Load a prompt with variable substitution. Throws if file does not exist.
     /// </summary>
     /// <param name="promptName">Name of the prompt file</param>
-    /// <param name="variables">Variables to substitute (e.g., {{LANGUAGE}} -> "python")</param>
-    /// <param name="fallbackPrompt">Fallback prompt if file doesn't exist</param>
+    /// <param name="variables">Variables to substitute (e.g., {{REQUIREMENT}} -> "..." )</param>
     /// <returns>The prompt content with variables replaced</returns>
-    public string LoadPrompt(string promptName, Dictionary<string, string> variables, string? fallbackPrompt = null)
+    public string LoadPromptRequired(string promptName, Dictionary<string, string> variables)
     {
-        var prompt = LoadPrompt(promptName, fallbackPrompt);
-        
+        var prompt = LoadPromptRequired(promptName);
         foreach (var (key, value) in variables)
-        {
-            prompt = prompt.Replace($"{{{{{key}}}}}", value);
-        }
-
+            prompt = prompt.Replace($"{{{{{key}}}}}", value ?? "");
         return prompt;
     }
+
+    /// <summary>
+    /// Load a prompt by name. Throws if file does not exist (no fallback).
+    /// </summary>
+    public string LoadPrompt(string promptName) => LoadPromptRequired(promptName);
 
     /// <summary>
     /// Clear the prompt cache (useful for hot-reloading)
@@ -159,7 +137,7 @@ public class PromptLoader
     {
         // Try to find prompts directory by looking up from base directory
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        
+
         while (dir != null)
         {
             var promptsPath = Path.Combine(dir.FullName, "prompts");
@@ -167,17 +145,17 @@ public class PromptLoader
             {
                 return promptsPath;
             }
-            
+
             // Also check if we're at solution root (has .sln file)
             if (dir.GetFiles("*.sln").Length > 0)
             {
                 promptsPath = Path.Combine(dir.FullName, "prompts");
                 return promptsPath; // Return even if doesn't exist yet
             }
-            
+
             dir = dir.Parent;
         }
-        
+
         // Fallback to base directory
         return Path.Combine(AppContext.BaseDirectory, "prompts");
     }

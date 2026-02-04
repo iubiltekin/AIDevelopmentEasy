@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using AIDevelopmentEasy.Core.Agents.Base;
 using AIDevelopmentEasy.Core.Models;
+using AIDevelopmentEasy.Core.Services;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Logging;
 
@@ -93,68 +95,6 @@ public class PlannerAgent : BaseAgent
         return await PlanWithCodebaseAsync(requirement, analysis, projectState, cancellationToken);
     }
 
-    protected override string GetFallbackPrompt()
-    {
-        return @"You are a **Software Project Planner Agent** based on the AgentMesh framework.
-
-Your role is requirement analysis and task decomposition - taking high-level requirements and breaking them down into concrete, implementable development tasks.
-
-## Core Responsibilities
-
-1. **Requirement Analysis**: Understand the high-level requirement thoroughly
-2. **Task Decomposition**: Break it down into small, manageable subtasks
-3. **Dependency Ordering**: Order tasks by dependency (what needs to be done first)
-4. **Codebase Integration**: When given existing codebase context, plan tasks that integrate properly
-
-## Guidelines
-
-- Each subtask should be completable in 1-2 hours of coding
-- Include both implementation and testing tasks
-- Consider edge cases and error handling
-- Think about the class/file structure
-- Keep task count reasonable (5-10 tasks max)
-
-## When Working with Existing Codebases
-
-If codebase context is provided:
-
-1. **Project Placement**: Identify which existing project(s) should contain the new code
-2. **Folder Structure**: Use the EXACT folder paths shown in the codebase context
-3. **Pattern Consistency**: Use the same patterns detected in the codebase (Repository, Service, Helper, etc.)
-4. **Convention Following**: Follow detected naming conventions (field prefixes, async suffixes, etc.)
-5. **Namespace Matching**: New classes should use namespaces matching their folder location
-6. **Test Structure**: Place tests in the corresponding UnitTest project using the same folder structure
-
-## File Placement (codebase-driven)
-
-When codebase context is provided, it contains a ""Languages and file extensions"" section for **this repo only**. Use ONLY those extensions per project in target_files. Do not use .py unless a project in that section has language Python; do not use .cs unless csharp is listed; match each target_file to its project's extension.
-
-## Create vs Modify (inferred from requirement)
-
-Decide **per task** whether the task **creates** new file(s) or **modifies** existing file(s). Infer from the requirement and codebase context (e.g. ""add a new service"" → create; ""fix the bug in UserController"" → modify). Output for each task: ""modification_type"": ""create"" or ""modification_type"": ""modify"".
-
-## Output Format (JSON)
-
-### CRITICAL: Namespace Requirement
-- Every task MUST include a ""namespace"" field
-- The namespace determines where the file will be placed in the project
-- Format: ProjectName.FolderName(e.g., Picus.Common.Helpers)
-
-### CRITICAL: modification_type
-- Every task MUST include ""modification_type"": ""create"" or ""modify"" based on the requirement.
-
-### Standalone (no codebase): target_files use appropriate extension for the project type.
-
-### With codebase context: use ONLY the file extensions from the ""Languages and file extensions"" section for each project. Include modification_type in each task.
-
-Output ONLY valid JSON.";
-    }
-
-    protected override string GetSystemPrompt()
-    {
-        return base.GetSystemPrompt();
-    }
-
     public override async Task<AgentResponse> RunAsync(AgentRequest request, CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("[Planner] Starting task decomposition for: {Input}",
@@ -172,31 +112,42 @@ Output ONLY valid JSON.";
                 var codebaseName = request.Context.TryGetValue("codebase_name", out var name) ? name : "existing codebase";
                 var testFramework = request.Context.TryGetValue("test_framework", out var tf) ? tf : "NUnit";
                 var fieldPrefix = request.Context.TryGetValue("private_field_prefix", out var fp) ? fp : "_";
-
-                codebaseContext = $@"
-
-## EXISTING CODEBASE: {codebaseName}
-
-{ctx}
-
-## INTEGRATION GUIDELINES (for this codebase only)
-
-1. **File extensions**: Use ONLY the extensions from the ""Languages and file extensions"" section above for each project. Never use .py unless a project in that section has language Python; never use .cs unless csharp is listed; never use .go unless go is listed; match extension to the project.
-2. **Project placement**: Put code in the project(s) and paths shown above.
-3. **Namespace/Package/Module**: Follow the convention shown in the codebase context for each project.
-4. **Conventions**: Private fields: {fieldPrefix}fieldName; Test framework: {testFramework}.
-5. **Tests**: Place in the test project/path from context, with the same file extension as that project.
-6. **Task fields**: project, target_files (paths with correct extension), depends_on, uses_existing.
-";
+                codebaseContext = PromptLoader.Instance.LoadPromptRequired("planner-codebase-context", new Dictionary<string, string>
+                {
+                    ["CODEBASE_NAME"] = codebaseName,
+                    ["CONTEXT"] = ctx,
+                    ["TEST_FRAMEWORK"] = testFramework,
+                    ["PRIVATE_FIELD_PREFIX"] = fieldPrefix
+                });
                 _logger?.LogInformation("[Planner] Using codebase context for planning: {Name}", codebaseName);
             }
 
             var userPrompt = hasCodebaseContext
-                ? BuildCodebaseAwarePrompt(request.Input, codebaseContext)
-                : BuildStandalonePrompt(request.Input);
+                ? BuildUserPromptCodebase(request.Input, codebaseContext)
+                : BuildUserPromptStandalone(request.Input);
+
+            var baseSystemPrompt = PromptLoader.Instance.LoadPromptRequired("planner");
+            if (hasCodebaseContext && request.Context?.TryGetValue("languages", out var languagesStr) == true && !string.IsNullOrEmpty(languagesStr))
+            {
+                var primaryLang = languagesStr.Split(',')[0].Trim().ToLowerInvariant();
+                if (primaryLang is "c#" or "csharp") primaryLang = "csharp";
+                if (primaryLang == "typescript") primaryLang = "react"; // React/TS frontend uses planner-react
+                if (PromptLoader.Instance.PromptExists($"planner-{primaryLang}"))
+                    baseSystemPrompt += "\n\n" + PromptLoader.Instance.LoadPromptRequired($"planner-{primaryLang}");
+            }
+
+            // When codebase has a DB migrator (e.g. psqlmigrations, scripts/migrator), add migration planner rules
+            var hasMigrator = request.Context?.TryGetValue("has_migrator", out var migratorVal) == true && migratorVal == "true";
+            if (!hasMigrator && hasCodebaseContext && request.Context?.TryGetValue("codebase_context", out var ctxRaw) == true && !string.IsNullOrEmpty(ctxRaw))
+                hasMigrator = ctxRaw.Contains("migrator", StringComparison.OrdinalIgnoreCase) &&
+                    (ctxRaw.Contains("psqlmigrations", StringComparison.OrdinalIgnoreCase) ||
+                     ctxRaw.Contains("migration_path", StringComparison.OrdinalIgnoreCase) ||
+                     ctxRaw.Contains("/migrations/", StringComparison.OrdinalIgnoreCase));
+            if (hasMigrator && PromptLoader.Instance.PromptExists("planner-migrator"))
+                baseSystemPrompt += "\n\n" + PromptLoader.Instance.LoadPromptRequired("planner-migrator");
 
             var (content, tokens) = await CallLLMAsync(
-                BuildSystemPromptWithStandards(request.ProjectState),
+                BuildSystemPromptWithStandards(request.ProjectState, baseSystemPrompt),
                 userPrompt,
                 temperature: 0.3f,
                 maxTokens: 4000,
@@ -312,118 +263,21 @@ Output ONLY valid JSON.";
         }
     }
 
-    /// <summary>
-    /// Build prompt for planning with existing codebase context
-    /// </summary>
-    private string BuildCodebaseAwarePrompt(string requirement, string codebaseContext)
+    private string BuildUserPromptCodebase(string requirement, string codebaseContext)
     {
-        return $@"Please analyze the following requirement and create a development plan that integrates with the existing codebase.
-
-# REQUIREMENT
-{requirement}
-
-{codebaseContext}
-
-# INSTRUCTIONS
-
-1. Analyze how this requirement fits into the existing codebase structure
-2. Identify which projects need modifications and whether each change creates new files or modifies existing ones
-3. Create tasks that follow existing patterns and conventions
-4. Order tasks by dependency (core implementations first, then consumers, then tests)
-5. Each task MUST specify the target project, files, namespace, and modification_type (create or modify)
-6. Each target_file MUST use the file extension for that project from the ""Languages and file extensions"" section (e.g. Go project → .go, TypeScript/React → .tsx, not .py unless the project language is Python)
-
-## CRITICAL: modification_type
-- For each task set ""modification_type"": ""create"" (new file) or ""modify"" (existing file), based on the requirement and codebase context
-- Infer from the requirement: e.g. ""add new endpoint"" → create or modify; ""fix bug in X"" → modify
-
-## CRITICAL: Namespace Convention
-- For each task, you MUST specify the FULL namespace
-- The namespace follows the pattern: ProjectName.SubFolder (e.g., Picus.Common.Helpers)
-- Look at existing classes in the codebase to determine the correct namespace
-- The namespace determines where the file will be placed in the project
-
-Output the plan as JSON with the following structure:
-{{
-    ""project_name"": ""Feature name or module name"",
-    ""summary"": ""Brief description of what will be implemented"",
-    ""tasks"": [
-        {{
-            ""index"": 1,
-            ""project"": ""ProjectName"",
-            ""title"": ""Task title"",
-            ""description"": ""Detailed implementation description"",
-            ""target_files"": [""Folder/FileName.<ext>""],
-            ""namespace"": ""ProjectName.Folder"",
-            ""modification_type"": ""create"" or ""modify"",
-            ""depends_on"": [],
-            ""uses_existing"": [""ExistingClass"", ""IExistingInterface""]
-        }}
-    ]
-}}
-
-Example (new file):
-{{
-    ""index"": 1,
-    ""project"": ""Picus.Common"",
-    ""title"": ""Create DateTimeHelper class"",
-    ""description"": ""Create DateTimeHelper class with AddDays method"",
-    ""target_files"": [""Helpers/DateTimeHelper.<ext>""],
-    ""namespace"": ""Picus.Common.Helpers"",
-    ""modification_type"": ""create"",
-    ""depends_on"": [],
-    ""uses_existing"": []
-}}
-Example (modify existing):
-{{
-    ""index"": 2,
-    ""project"": ""Picus.Api"",
-    ""title"": ""Add validation to UserController"",
-    ""description"": ""Add input validation to the create method"",
-    ""target_files"": [""Controllers/UserController.<ext>""],
-    ""namespace"": ""Picus.Api.Controllers"",
-    ""modification_type"": ""modify"",
-    ""depends_on"": [1],
-    ""uses_existing"": [""UserController""]
-}}";
+        return PromptLoader.Instance.LoadPromptRequired("planner-user-codebase", new Dictionary<string, string>
+        {
+            ["REQUIREMENT"] = requirement,
+            ["CODEBASE_CONTEXT"] = codebaseContext
+        });
     }
 
-    /// <summary>
-    /// Build prompt for standalone planning (no existing codebase)
-    /// </summary>
-    private string BuildStandalonePrompt(string requirement)
+    private string BuildUserPromptStandalone(string requirement)
     {
-        return $@"Please analyze the following requirement and create a development plan:
-
-# REQUIREMENT
-{requirement}
-
-# INSTRUCTIONS
-
-Break this down into specific development tasks. Consider:
-- What data structures/models are needed?
-- What functions/methods need to be implemented?
-- What error handling is required?
-- What tests should be written?
-
-## CRITICAL: Namespace Requirement
-- For each task, you MUST specify the full namespace
-- The namespace should match the folder structure (e.g., MyProject.Helpers for Helpers/ folder)
-
-Output the plan as JSON with the following structure:
-{{
-    ""project_name"": ""Short project name"",
-    ""summary"": ""Brief summary of what will be built"",
-    ""tasks"": [
-        {{
-            ""index"": 1,
-            ""title"": ""Short descriptive title"",
-            ""description"": ""Detailed description of what to implement"",
-            ""target_files"": [""ClassName.cs""],
-            ""namespace"": ""ProjectName.FolderName""
-        }}
-    ]
-}}";
+        return PromptLoader.Instance.LoadPromptRequired("planner-user-standalone", new Dictionary<string, string>
+        {
+            ["REQUIREMENT"] = requirement
+        });
     }
 
     /// <summary>
@@ -448,10 +302,18 @@ Output the plan as JSON with the following structure:
             ? _codeAnalysisAgent.GenerateContextForPrompt(codebaseAnalysis)
             : "";
 
-        var userPrompt = BuildModificationPrompt(requirement, modificationContext, codebaseContext);
+        var codebaseSection = string.IsNullOrEmpty(codebaseContext)
+            ? ""
+            : "\n# CODEBASE CONTEXT\n\n" + codebaseContext + "\n\n";
+        var userPrompt = PromptLoader.Instance.LoadPromptRequired("planner-modification-user", new Dictionary<string, string>
+        {
+            ["REQUIREMENT"] = requirement,
+            ["MODIFICATION_CONTEXT"] = modificationContext,
+            ["CODEBASE_SECTION"] = codebaseSection
+        });
 
         var (content, tokens) = await CallLLMAsync(
-            BuildModificationSystemPrompt(),
+            PromptLoader.Instance.LoadPromptRequired("planner-modification"),
             userPrompt,
             temperature: 0.3f,
             maxTokens: 8000,
@@ -558,118 +420,4 @@ Output the plan as JSON with the following structure:
         }
     }
 
-    private string BuildModificationSystemPrompt()
-    {
-        return @"You are a **Code Modification Planner Agent** specializing in refactoring and updating existing codebases.
-
-Your job is to analyze a requirement that affects an existing class and create a detailed plan for:
-1. Modifying the target class itself
-2. Updating all files that reference this class
-
-## Key Principles
-
-1. **Preserve Existing Behavior**: Modifications should not break existing functionality
-2. **Incremental Changes**: Order tasks so changes propagate correctly
-3. **Reference Awareness**: Understand how changes to one file affect others
-4. **File Integrity**: Always output the COMPLETE modified file, not just the changes
-
-## Task Types
-
-- **modify**: Modify an existing file (keep all existing code, add/change specific parts)
-- **create**: Create a new file (only when absolutely necessary)
-
-## Modification Task Structure
-
-For each task provide:
-- **modification_type**: 'modify' or 'create'
-- **target_files**: The file path(s) to modify
-- **description**: Detailed description including:
-  - What specific changes to make
-  - Which methods/properties to update
-  - How to handle the existing code
-
-## Output Format (JSON)
-
-```json
-{
-    ""project_name"": ""Feature/Change name"",
-    ""summary"": ""What this modification achieves"",
-    ""tasks"": [
-        {
-            ""index"": 1,
-            ""project"": ""ProjectName"",
-            ""modification_type"": ""modify"",
-            ""title"": ""Modify ClassName - add new method"",
-            ""description"": ""Add NewMethod() to ClassName. Keep all existing methods intact. The new method should..."",
-            ""target_files"": [""Path/ClassName.cs""],
-            ""depends_on"": [],
-            ""uses_existing"": [""ExistingClass""]
-        },
-        {
-            ""index"": 2,
-            ""project"": ""ProjectName"",
-            ""modification_type"": ""modify"",
-            ""title"": ""Update ConsumerClass - update method call"",
-            ""description"": ""In ConsumerClass.SomeMethod(), update the call to ClassName to use the new method..."",
-            ""target_files"": [""Path/ConsumerClass.cs""],
-            ""depends_on"": [1],
-            ""uses_existing"": [""ClassName""]
-        }
-    ]
-}
-```
-
-## Task Ordering
-
-1. **Primary class modification FIRST**: Changes to the main class being modified
-2. **Dependent modifications SECOND**: Files that inherit from or heavily depend on the primary class
-3. **Reference updates THIRD**: Files that use the class (method calls, instantiation)
-4. **Test updates LAST**: Update or add tests for the modifications
-
-**IMPORTANT**: 
-- Output ONLY valid JSON, no explanations before or after
-- Always specify modification_type for each task
-- Provide detailed descriptions so the Coder knows exactly what to change";
-    }
-
-    private string BuildModificationPrompt(string requirement, string modificationContext, string codebaseContext)
-    {
-        var prompt = $@"# MODIFICATION REQUIREMENT
-
-{requirement}
-
-# TARGET CLASS AND REFERENCES
-
-{modificationContext}
-";
-
-        if (!string.IsNullOrEmpty(codebaseContext))
-        {
-            prompt += $@"
-# CODEBASE CONTEXT
-
-{codebaseContext}
-";
-        }
-
-        prompt += @"
-# INSTRUCTIONS
-
-Based on the requirement and the class/reference information above:
-
-1. Create tasks to modify the primary class first
-2. Create tasks to update all affected files that reference this class
-3. Ensure each task has clear, specific instructions for what to change
-4. Order tasks by dependency (primary class first, then consumers)
-5. Keep existing code intact - only modify what's necessary
-
-For each file that needs changes, create a separate task with:
-- Clear description of what to modify
-- Which methods/properties are affected
-- How the existing code should be preserved
-
-Output your plan as JSON.";
-
-        return prompt;
-    }
 }

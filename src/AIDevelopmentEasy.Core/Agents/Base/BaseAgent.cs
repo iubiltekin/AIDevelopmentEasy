@@ -33,28 +33,17 @@ public abstract class BaseAgent : IAgent
 
     /// <summary>
     /// Get the system prompt for this agent's role.
-    /// First tries to load from prompts/ directory, then falls back to hardcoded.
+    /// Loads from prompts/ directory; throws if file is missing (no fallback).
     /// </summary>
     protected virtual string GetSystemPrompt()
     {
-        // Try to load from file if PromptFileName is specified
         if (!string.IsNullOrEmpty(PromptFileName))
-        {
-            try
-            {
-                return PromptLoader.Instance.LoadPrompt(PromptFileName, GetFallbackPrompt());
-            }
-            catch (FileNotFoundException)
-            {
-                _logger?.LogWarning("[{Agent}] Prompt file not found: {File}, using fallback", Name, PromptFileName);
-            }
-        }
-
+            return PromptLoader.Instance.LoadPromptRequired(PromptFileName!);
         return GetFallbackPrompt();
     }
 
     /// <summary>
-    /// Get the fallback hardcoded prompt (override in derived classes)
+    /// Fallback used only when PromptFileName is null (e.g. base role line).
     /// </summary>
     protected virtual string GetFallbackPrompt() => $"You are a {Role}.";
 
@@ -319,11 +308,12 @@ public abstract class BaseAgent : IAgent
     }
 
     /// <summary>
-    /// Build the full system prompt including coding standards if available
+    /// Build the full system prompt including coding standards if available.
+    /// When baseSystemPrompt is provided, use it instead of GetSystemPrompt() (e.g. planner + planner-lang).
     /// </summary>
-    protected string BuildSystemPromptWithStandards(ProjectState? state)
+    protected string BuildSystemPromptWithStandards(ProjectState? state, string? baseSystemPrompt = null)
     {
-        var basePrompt = GetSystemPrompt();
+        var basePrompt = baseSystemPrompt ?? GetSystemPrompt();
 
         if (state?.CodingStandards == null)
             return basePrompt;

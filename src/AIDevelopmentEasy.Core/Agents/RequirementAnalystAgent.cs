@@ -58,7 +58,7 @@ public class RequirementAnalystAgent : BaseAgent
     private string GetSystemPromptForType(RequirementType type)
     {
         var promptFileName = GetPromptFileNameForType(type);
-        return Services.PromptLoader.Instance.LoadPrompt(promptFileName, GetFallbackPrompt());
+        return Services.PromptLoader.Instance.LoadPromptRequired(promptFileName);
     }
 
     /// <summary>
